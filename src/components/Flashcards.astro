@@ -1,0 +1,52 @@
+---
+interface Card { front: string; back: string }
+interface Props { cards: Card[]; title?: string }
+const { cards, title = 'Flashcards' } = Astro.props;
+if (!Array.isArray(cards) || cards.length === 0 || cards.some((c) => !c?.front || !c?.back)) throw new Error('<Flashcards> needs cards={[{ front: "...", back: "..." }, ...]}');
+---
+<div class="not-prose my-8" data-component="flashcards" data-state="pending">
+  <div class="flex items-center justify-between mb-3">
+    <span class="text-[0.7rem] font-semibold uppercase tracking-widest text-secondary">{title}</span>
+    <span class="fc-count font-mono text-xs text-base-content/55">1 / {cards.length}</span>
+  </div>
+  <div class="fc-stage relative h-56 sm:h-52 [perspective:1200px]">
+    {cards.map((c, i) => (
+      <button type="button" class:list={['fc-card absolute inset-0 w-full cursor-pointer', i > 0 && 'hidden']} aria-label="Flip card">
+        <div class="fc-inner relative h-full w-full transition-transform duration-500 [transform-style:preserve-3d]">
+          <div class="fc-face absolute inset-0 grid place-items-center rounded-box border border-base-300 bg-base-100 p-6 [backface-visibility:hidden] shadow-sm">
+            <span class="font-serif text-xl sm:text-2xl leading-snug text-center text-balance">{c.front}</span>
+            <span class="absolute bottom-3 text-xs text-base-content/40">click to flip</span>
+          </div>
+          <div class="fc-face absolute inset-0 grid place-items-center rounded-box border border-primary/40 bg-primary/8 p-6 [backface-visibility:hidden] [transform:rotateY(180deg)]">
+            <span class="text-[1.02rem] leading-relaxed text-center text-pretty">{c.back}</span>
+          </div>
+        </div>
+      </button>
+    ))}
+  </div>
+  <div class="mt-3 flex justify-center gap-2">
+    <button type="button" class="fc-prev btn btn-sm btn-ghost border-base-300">← Prev</button>
+    <button type="button" class="fc-next btn btn-sm btn-ghost border-base-300">Next →</button>
+  </div>
+</div>
+<style>
+  .fc-card.flipped .fc-inner { transform: rotateY(180deg); }
+</style>
+<script>
+  import { markReady } from '../lib/client.ts';
+  for (const root of document.querySelectorAll<HTMLElement>('[data-component="flashcards"]')) {
+    const cards = [...root.querySelectorAll<HTMLElement>('.fc-card')];
+    const count = root.querySelector<HTMLElement>('.fc-count')!;
+    let i = 0;
+    const show = (n: number) => {
+      cards[i].classList.add('hidden'); cards[i].classList.remove('flipped');
+      i = (n + cards.length) % cards.length;
+      cards[i].classList.remove('hidden');
+      count.textContent = `${i + 1} / ${cards.length}`;
+    };
+    cards.forEach((c) => c.addEventListener('click', () => c.classList.toggle('flipped')));
+    root.querySelector('.fc-prev')!.addEventListener('click', () => show(i - 1));
+    root.querySelector('.fc-next')!.addEventListener('click', () => show(i + 1));
+    markReady(root);
+  }
+</script>

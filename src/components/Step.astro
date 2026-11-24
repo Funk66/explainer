@@ -1,0 +1,9 @@
+---
+interface Props { title: string }
+const { title } = Astro.props;
+---
+<section class="wt-step" data-title={title}><slot /></section>
+<style>
+  .wt-step > :global(:first-child) { margin-top: 0; }
+  .wt-step > :global(:last-child) { margin-bottom: 0; }
+</style>

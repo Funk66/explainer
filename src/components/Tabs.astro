@@ -1,0 +1,29 @@
+---
+// Container for <Tab label="..."> children. Tab buttons are generated from the labels.
+---
+<div class="my-8 rounded-box border border-base-300 overflow-hidden" data-component="tabs" data-state="pending">
+  <div role="tablist" class="not-prose tabs tabs-border bg-base-200/50 px-2 overflow-x-auto flex-nowrap"></div>
+  <div class="tab-panels px-5 py-4"><slot /></div>
+</div>
+<script>
+  import { markError, markReady } from '../lib/client.ts';
+  for (const root of document.querySelectorAll<HTMLElement>('[data-component="tabs"]')) {
+    const list = root.querySelector<HTMLElement>(':scope > [role=tablist]')!;
+    const panels = [...root.querySelectorAll<HTMLElement>(':scope > .tab-panels > .tab-panel')];
+    if (panels.length === 0) { markError(root, '<Tabs> contains no <Tab label="..."> children'); continue; }
+    const buttons = panels.map((p, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.role = 'tab'; b.className = 'tab whitespace-nowrap font-medium';
+      b.textContent = p.dataset.label ?? `Tab ${i + 1}`;
+      b.addEventListener('click', () => select(i));
+      list.append(b);
+      return b;
+    });
+    const select = (n: number) => {
+      panels.forEach((p, i) => p.classList.toggle('hidden', i !== n));
+      buttons.forEach((b, i) => { b.classList.toggle('tab-active', i === n); b.setAttribute('aria-selected', String(i === n)); });
+    };
+    select(0);
+    markReady(root);
+  }
+</script>

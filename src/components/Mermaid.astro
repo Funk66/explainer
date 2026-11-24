@@ -1,0 +1,87 @@
+---
+// Usually produced automatically from ```mermaid fenced code blocks.
+interface Props { code: string; caption?: string }
+const { code, caption } = Astro.props;
+---
+<figure class="not-prose my-8" data-component="mermaid" data-state="pending" data-code={code}>
+  <div class="mermaid-target flex justify-center overflow-x-auto rounded-box border border-base-300 bg-base-100 px-4 py-6 min-h-16"></div>
+  {caption && <figcaption class="figure-caption">{caption}</figcaption>}
+</figure>
+<style>
+  .mermaid-target :global(svg) { height: auto; max-width: 100%; }
+</style>
+<script>
+  import mermaid from 'mermaid';
+  import { cssColor, markError, markReady, mix, onThemeChange } from '../lib/client.ts';
+
+  let counter = 0;
+  async function renderAll() {
+    const base = cssColor('var(--color-base-100)');
+    const text = cssColor('var(--color-base-content)');
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      securityLevel: 'strict',
+      fontFamily: 'Inter Variable, ui-sans-serif, system-ui, sans-serif',
+      themeVariables: {
+        fontFamily: 'Inter Variable, ui-sans-serif, system-ui, sans-serif',
+        fontSize: '15px',
+        background: base,
+        primaryColor: mix('--color-primary', 14),
+        primaryBorderColor: mix('--color-primary', 70),
+        primaryTextColor: text,
+        secondaryColor: mix('--color-secondary', 16),
+        secondaryBorderColor: mix('--color-secondary', 70),
+        secondaryTextColor: text,
+        tertiaryColor: mix('--color-accent', 14),
+        tertiaryBorderColor: mix('--color-accent', 70),
+        tertiaryTextColor: text,
+        lineColor: mix('--color-base-content', 55),
+        textColor: text,
+        mainBkg: mix('--color-primary', 14),
+        nodeBorder: mix('--color-primary', 70),
+        clusterBkg: mix('--color-base-content', 4),
+        clusterBorder: mix('--color-base-content', 20),
+        edgeLabelBackground: base,
+        noteBkgColor: mix('--color-warning', 20),
+        noteTextColor: text,
+        noteBorderColor: mix('--color-warning', 70),
+        actorBkg: mix('--color-primary', 14),
+        actorBorder: mix('--color-primary', 70),
+        actorTextColor: text,
+        signalColor: text,
+        signalTextColor: text,
+        labelBoxBkgColor: mix('--color-secondary', 16),
+        labelTextColor: text,
+        pie1: cssColor('var(--color-primary)'),
+        pie2: cssColor('var(--color-secondary)'),
+        pie3: cssColor('var(--color-accent)'),
+        pie4: cssColor('var(--color-warning)'),
+        pie5: cssColor('var(--color-info)'),
+        pie6: cssColor('var(--color-error)'),
+        pieStrokeColor: base,
+        pieTitleTextColor: text,
+        pieLegendTextColor: text,
+        git0: cssColor('var(--color-primary)'),
+        git1: cssColor('var(--color-secondary)'),
+        git2: cssColor('var(--color-accent)'),
+      },
+    });
+    for (const fig of document.querySelectorAll<HTMLElement>('[data-component="mermaid"]')) {
+      const target = fig.querySelector<HTMLElement>('.mermaid-target')!;
+      const code = fig.dataset.code ?? '';
+      const id = `mermaid-${++counter}`;
+      try {
+        const { svg } = await mermaid.render(id, code.trim());
+        target.innerHTML = svg;
+        markReady(fig);
+      } catch (err: any) {
+        document.getElementById(id)?.remove();
+        document.getElementById(`d${id}`)?.remove();
+        markError(fig, String(err?.message ?? err).split('\n').slice(0, 6).join('\n'));
+      }
+    }
+  }
+  renderAll();
+  onThemeChange(renderAll);
+</script>

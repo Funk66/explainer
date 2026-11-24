@@ -1,0 +1,16 @@
+---
+interface Props { term: string; aka?: string }
+const { term, aka } = Astro.props;
+---
+<div class="my-7 rounded-box border border-base-300 bg-base-200/50 px-5 py-4">
+  <div class="not-prose flex flex-wrap items-baseline gap-x-3 mb-1">
+    <span class="text-[0.7rem] font-semibold uppercase tracking-widest text-base-content/50">Definition</span>
+    <dfn class="font-serif text-xl not-italic font-semibold text-primary">{term}</dfn>
+    {aka && <span class="text-sm text-base-content/55">also: {aka}</span>}
+  </div>
+  <div class="definition-body font-serif text-[1.08rem] leading-relaxed"><slot /></div>
+</div>
+<style>
+  .definition-body > :global(:first-child) { margin-top: 0; }
+  .definition-body > :global(:last-child) { margin-bottom: 0; }
+</style>

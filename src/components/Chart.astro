@@ -1,0 +1,37 @@
+---
+// Any Apache ECharts option object. https://echarts.apache.org/en/option.html
+interface Props { option: Record<string, unknown>; height?: number; caption?: string; wide?: boolean }
+const { option, height = 360, caption, wide = false } = Astro.props;
+if (!option || typeof option !== 'object') throw new Error('<Chart> needs an option={{ ... }} object (an ECharts option).');
+if (!('series' in option)) throw new Error('<Chart option={...}> is missing "series". Provide at least one series, e.g. series: [{ type: "bar", data: [1, 2, 3] }].');
+---
+<figure class:list={['not-prose my-8', wide && 'figure-wide']} data-component="chart" data-state="pending">
+  <div class="chart-target w-full" style={`height:${height}px`} data-option={JSON.stringify(option)}></div>
+  {caption && <figcaption class="figure-caption">{caption}</figcaption>}
+</figure>
+<script>
+  import * as echarts from 'echarts';
+  import { markError, markReady, onThemeChange, readJSON } from '../lib/client.ts';
+  import { registerEchartsTheme, withDefaults } from '../lib/echarts-theme.ts';
+
+  const charts = new Map<HTMLElement, echarts.ECharts>();
+  function renderAll() {
+    const theme = registerEchartsTheme();
+    for (const fig of document.querySelectorAll<HTMLElement>('[data-component="chart"]')) {
+      const el = fig.querySelector<HTMLElement>('.chart-target')!;
+      try {
+        charts.get(el)?.dispose();
+        const chart = echarts.init(el, theme, { renderer: 'canvas' });
+        chart.setOption(withDefaults(readJSON(el, 'data-option')));
+        charts.set(el, chart);
+        markReady(fig);
+      } catch (err: any) {
+        markError(fig, String(err?.message ?? err));
+      }
+    }
+  }
+  renderAll();
+  onThemeChange(renderAll);
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => charts.get(e.target as HTMLElement)?.resize()));
+  document.querySelectorAll<HTMLElement>('[data-component="chart"] .chart-target').forEach((el) => ro.observe(el));
+</script>

@@ -1,0 +1,12 @@
+---
+interface Props { title?: string }
+const { title = 'Show answer' } = Astro.props;
+---
+<details class="reveal collapse collapse-plus my-6 rounded-box border border-base-300 bg-base-200/40">
+  <summary class="not-prose collapse-title font-semibold text-[0.95rem]">{title}</summary>
+  <div class="collapse-content"><div class="reveal-body"><slot /></div></div>
+</details>
+<style>
+  .reveal-body > :global(:first-child) { margin-top: 0; }
+  .reveal-body > :global(:last-child) { margin-bottom: 0; }
+</style>

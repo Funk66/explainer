@@ -1,0 +1,62 @@
+---
+// Multiple-choice question. `answer` is the 0-based index of the correct option, or its exact text.
+// Children (optional) are the explanation, revealed after answering.
+interface Props { question: string; options: string[]; answer: number | string; explanation?: string }
+const { question, options, answer, explanation } = Astro.props;
+if (!Array.isArray(options) || options.length < 2) throw new Error(`<Quiz question="${question}"> needs options={["...", "..."]} with at least 2 entries.`);
+const correct = typeof answer === 'number' ? answer : options.indexOf(answer);
+if (!(correct >= 0 && correct < options.length)) throw new Error(`<Quiz question="${question}">: answer=${JSON.stringify(answer)} does not match any option (use a 0-based index or the exact option text).`);
+const hasSlot = Astro.slots.has('default');
+---
+<div class="quiz my-8 rounded-box border border-base-300 bg-base-200/40 p-5 sm:p-6" data-component="quiz" data-state="pending" data-correct={correct}>
+  <div class="not-prose flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-widest text-secondary mb-2">
+    <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></svg>
+    Check your understanding
+  </div>
+  <p class="not-prose font-serif text-lg sm:text-xl leading-snug mb-4">{question}</p>
+  <div class="not-prose grid gap-2">
+    {options.map((o, i) => (
+      <button type="button" class="quiz-option btn btn-ghost h-auto min-h-11 justify-start text-left font-normal normal-case border border-base-300 bg-base-100 py-2.5 whitespace-normal" data-index={i}>
+        <span class="quiz-letter grid place-items-center size-6 shrink-0 rounded-full border border-base-content/25 text-xs font-semibold">{String.fromCharCode(65 + i)}</span>
+        <span class="leading-snug">{o}</span>
+      </button>
+    ))}
+  </div>
+  <div class="quiz-feedback hidden mt-4">
+    <p class="not-prose quiz-verdict font-semibold mb-1"></p>
+    {explanation && <p class="not-prose text-[0.97rem] leading-relaxed text-base-content/80">{explanation}</p>}
+    {hasSlot && <div class="quiz-body"><slot /></div>}
+    <button type="button" class="not-prose quiz-retry btn btn-xs btn-ghost mt-3 px-0 text-base-content/60">Try again</button>
+  </div>
+</div>
+<style>
+  .quiz-option[data-result='correct'] { border-color: var(--color-success); background: color-mix(in oklab, var(--color-success) 14%, var(--color-base-100)); }
+  .quiz-option[data-result='correct'] .quiz-letter { background: var(--color-success); color: var(--color-success-content); border-color: transparent; }
+  .quiz-option[data-result='wrong'] { border-color: var(--color-error); background: color-mix(in oklab, var(--color-error) 12%, var(--color-base-100)); }
+  .quiz-option[data-result='wrong'] .quiz-letter { background: var(--color-error); color: var(--color-error-content); border-color: transparent; }
+  .quiz-option:disabled { color: inherit; opacity: 1; }
+  .quiz-body > :global(:first-child) { margin-top: 0; }
+</style>
+<script>
+  import { markReady } from '../lib/client.ts';
+  for (const quiz of document.querySelectorAll<HTMLElement>('[data-component="quiz"]')) {
+    const correct = Number(quiz.dataset.correct);
+    const options = [...quiz.querySelectorAll<HTMLButtonElement>('.quiz-option')];
+    const feedback = quiz.querySelector<HTMLElement>('.quiz-feedback')!;
+    const verdict = quiz.querySelector<HTMLElement>('.quiz-verdict')!;
+    options.forEach((btn) => btn.addEventListener('click', () => {
+      const chosen = Number(btn.dataset.index);
+      options.forEach((b) => { b.disabled = true; });
+      options[correct].dataset.result = 'correct';
+      if (chosen !== correct) btn.dataset.result = 'wrong';
+      verdict.textContent = chosen === correct ? 'Correct!' : `Not quite — the answer is ${String.fromCharCode(65 + correct)}.`;
+      verdict.className = `not-prose quiz-verdict font-semibold mb-1 ${chosen === correct ? 'text-success' : 'text-error'}`;
+      feedback.classList.remove('hidden');
+    }));
+    quiz.querySelector('.quiz-retry')!.addEventListener('click', () => {
+      options.forEach((b) => { b.disabled = false; delete b.dataset.result; });
+      feedback.classList.add('hidden');
+    });
+    markReady(quiz);
+  }
+</script>

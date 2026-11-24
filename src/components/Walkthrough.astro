@@ -1,0 +1,53 @@
+---
+// Interactive step-by-step sequence of <Step title="..."> children, navigated with Prev / Next.
+interface Props { title?: string }
+const { title } = Astro.props;
+---
+<div class="my-8 rounded-box border border-base-300 bg-base-200/30" data-component="walkthrough" data-state="pending">
+  <div class="not-prose flex items-center justify-between gap-3 border-b border-base-300 px-5 py-3">
+    <div class="min-w-0">
+      {title && <div class="text-[0.7rem] font-semibold uppercase tracking-widest text-secondary">{title}</div>}
+      <div class="wt-heading font-serif text-lg font-semibold leading-snug truncate"></div>
+    </div>
+    <span class="wt-count shrink-0 font-mono text-xs text-base-content/55"></span>
+  </div>
+  <div class="wt-panels px-5 py-4"><slot /></div>
+  <div class="not-prose flex items-center justify-between gap-3 border-t border-base-300 px-5 py-3">
+    <button type="button" class="wt-prev btn btn-sm btn-ghost">← Back</button>
+    <div class="wt-dots flex gap-1.5"></div>
+    <button type="button" class="wt-next btn btn-sm btn-primary">Next →</button>
+  </div>
+</div>
+<script>
+  import { markError, markReady } from '../lib/client.ts';
+  for (const root of document.querySelectorAll<HTMLElement>('[data-component="walkthrough"]')) {
+    const steps = [...root.querySelectorAll<HTMLElement>(':scope > .wt-panels > .wt-step')];
+    if (steps.length === 0) { markError(root, '<Walkthrough> contains no <Step title="..."> children'); continue; }
+    const heading = root.querySelector<HTMLElement>('.wt-heading')!;
+    const count = root.querySelector<HTMLElement>('.wt-count')!;
+    const prev = root.querySelector<HTMLButtonElement>('.wt-prev')!;
+    const next = root.querySelector<HTMLButtonElement>('.wt-next')!;
+    const dots = steps.map((_, i) => {
+      const d = document.createElement('button');
+      d.type = 'button'; d.className = 'size-2.5 rounded-full bg-base-300 transition-colors';
+      d.ariaLabel = `Go to step ${i + 1}`;
+      d.addEventListener('click', () => show(i));
+      root.querySelector('.wt-dots')!.append(d);
+      return d;
+    });
+    let i = 0;
+    const show = (n: number) => {
+      i = Math.max(0, Math.min(steps.length - 1, n));
+      steps.forEach((s, k) => s.classList.toggle('hidden', k !== i));
+      dots.forEach((d, k) => { d.classList.toggle('bg-primary', k <= i); d.classList.toggle('bg-base-300', k > i); });
+      heading.textContent = steps[i].dataset.title ?? '';
+      count.textContent = `Step ${i + 1} of ${steps.length}`;
+      prev.disabled = i === 0;
+      next.disabled = i === steps.length - 1;
+    };
+    prev.addEventListener('click', () => show(i - 1));
+    next.addEventListener('click', () => show(i + 1));
+    show(0);
+    markReady(root);
+  }
+</script>

@@ -1,0 +1,99 @@
+---
+// Interactive plot of y = f(x) with sliders for parameters.
+interface Param { name: string; label?: string; min: number; max: number; step?: number; value: number }
+interface Curve { expr: string; label?: string }
+interface Props {
+  fn: string | Curve[];
+  params?: Param[];
+  x?: [number, number];
+  y?: [number, number];
+  samples?: number;
+  xLabel?: string;
+  yLabel?: string;
+  height?: number;
+  caption?: string;
+}
+const { fn, params = [], x = [-10, 10], y, samples = 300, xLabel = 'x', yLabel = 'y', height = 340, caption } = Astro.props;
+const curves: Curve[] = typeof fn === 'string' ? [{ expr: fn }] : fn;
+if (!curves?.length) throw new Error('<FunctionPlot> needs fn="expression in x" or fn={[{ expr, label }]}');
+for (const p of params) {
+  if (!/^[A-Za-z_]\w*$/.test(p.name) || p.name === 'x') throw new Error(`<FunctionPlot> param name "${p.name}" must be a simple identifier other than "x".`);
+  if (!(p.min <= p.value && p.value <= p.max)) throw new Error(`<FunctionPlot> param "${p.name}": value ${p.value} must be between min ${p.min} and max ${p.max}.`);
+}
+const config = { curves, params, x, y, samples, xLabel, yLabel };
+---
+<figure class="not-prose my-8 rounded-box border border-base-300 bg-base-200/30 p-4 sm:p-5" data-component="function-plot" data-state="pending" data-config={JSON.stringify(config)}>
+  <div class="fp-chart w-full" style={`height:${height}px`}></div>
+  {params.length > 0 && (
+    <div class="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+      {params.map((p) => (
+        <label class="block">
+          <div class="flex justify-between text-sm mb-1">
+            <span class="font-medium">{p.label ?? p.name} <span class="font-mono text-base-content/50">({p.name})</span></span>
+            <output class="font-mono text-primary font-semibold" data-out={p.name}>{p.value}</output>
+          </div>
+          <input type="range" class="range range-primary range-xs w-full" data-param={p.name} min={p.min} max={p.max} step={p.step ?? (p.max - p.min) / 100} value={p.value} />
+        </label>
+      ))}
+    </div>
+  )}
+  {caption && <figcaption class="figure-caption">{caption}</figcaption>}
+</figure>
+<script>
+  import * as echarts from 'echarts';
+  import { markError, markReady, onThemeChange, readJSON } from '../lib/client.ts';
+  import { registerEchartsTheme } from '../lib/echarts-theme.ts';
+
+  type Config = { curves: { expr: string; label?: string }[]; params: { name: string }[]; x: [number, number]; y?: [number, number]; samples: number; xLabel: string; yLabel: string };
+  const MATH = Object.getOwnPropertyNames(Math);
+
+  function setup(fig: HTMLElement) {
+    const cfg = readJSON<Config>(fig, 'data-config');
+    const names = cfg.params.map((p) => p.name);
+    const fns = cfg.curves.map((c) => {
+      // Math.* is available unprefixed: sin(x), exp(-a*x), PI, ...
+      const f = new Function(...MATH, 'x', ...names, `return (${c.expr.replace(/\^/g, '**')});`);
+      return (x: number, vals: number[]) => f(...MATH.map((k) => (Math as any)[k]), x, ...vals);
+    });
+    const inputs = [...fig.querySelectorAll<HTMLInputElement>('input[data-param]')];
+    const el = fig.querySelector<HTMLElement>('.fp-chart')!;
+    let chart: echarts.ECharts;
+
+    const data = () => {
+      const vals = names.map((n) => Number(inputs.find((i) => i.dataset.param === n)!.value));
+      const [a, b] = cfg.x;
+      return fns.map((f) => Array.from({ length: cfg.samples + 1 }, (_, i) => {
+        const xv = a + ((b - a) * i) / cfg.samples;
+        const yv = f(xv, vals);
+        return [xv, Number.isFinite(yv) ? yv : null];
+      }));
+    };
+    const update = () => chart.setOption({ series: data().map((d) => ({ data: d })) });
+    const init = () => {
+      chart?.dispose();
+      chart = echarts.init(el, registerEchartsTheme());
+      const series = data();
+      if (series.every((s) => s.every(([, y]) => y === null))) throw new Error('every evaluated value is NaN/Infinity — check the expression');
+      chart.setOption({
+        animation: false,
+        grid: { left: 16, right: 28, top: cfg.curves.length > 1 ? 56 : 36, bottom: 34, containLabel: true },
+        legend: cfg.curves.length > 1 ? { top: 0 } : undefined,
+        tooltip: { trigger: 'axis', confine: true, valueFormatter: (v: any) => (typeof v === 'number' ? v.toPrecision(4) : v) },
+        xAxis: { type: 'value', min: cfg.x[0], max: cfg.x[1], name: cfg.xLabel, nameLocation: 'middle', nameGap: 30 },
+        yAxis: { type: 'value', min: cfg.y?.[0], max: cfg.y?.[1], name: cfg.yLabel },
+        series: series.map((d, i) => ({ type: 'line', name: cfg.curves[i].label ?? cfg.curves[i].expr, showSymbol: false, smooth: false, data: d, lineStyle: { width: 2.5 } })),
+      });
+    };
+    inputs.forEach((inp) => inp.addEventListener('input', () => {
+      fig.querySelector(`output[data-out="${inp.dataset.param}"]`)!.textContent = inp.value;
+      update();
+    }));
+    init();
+    onThemeChange(init);
+    new ResizeObserver(() => chart.resize()).observe(el);
+  }
+
+  for (const fig of document.querySelectorAll<HTMLElement>('[data-component="function-plot"]')) {
+    try { setup(fig); markReady(fig); } catch (err: any) { markError(fig, String(err?.message ?? err)); }
+  }
+</script>

@@ -1,0 +1,142 @@
+---
+import 'katex/dist/katex.min.css';
+import '../styles/global.css';
+import type { MarkdownHeading } from 'astro';
+
+interface Props {
+  title: string;
+  description: string;
+  tags?: string[];
+  date?: Date;
+  level?: string;
+  model?: string;
+  readingMinutes: number;
+  headings: MarkdownHeading[];
+}
+const { title, description, tags = [], date, level, model, readingMinutes, headings } = Astro.props;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const dateLabel = date?.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+---
+<!doctype html>
+<html lang="en" data-theme="paper">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="generator" content="explainer" />
+    <title>{title}</title>
+    <script is:inline>
+      (() => {
+        let t = null;
+        try { t = localStorage.getItem('explainer-theme'); } catch {}
+        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'ink' : 'paper';
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="progress" class="fixed top-0 left-0 h-[3px] bg-primary z-50 origin-left" style="width:100%;transform:scaleX(0)"></div>
+
+    <button id="theme-toggle" class="btn btn-ghost btn-circle btn-sm fixed top-3 right-3 z-40 bg-base-100/80 backdrop-blur" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="theme-icon-sun size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="theme-icon-moon size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+    </button>
+
+    <header class="relative overflow-hidden border-b border-base-300 bg-base-200/60">
+      <div class="absolute inset-0 pointer-events-none opacity-60" style="background: radial-gradient(60rem 22rem at 15% -10%, color-mix(in oklab, var(--color-primary) 14%, transparent), transparent), radial-gradient(40rem 18rem at 95% 0%, color-mix(in oklab, var(--color-secondary) 12%, transparent), transparent);"></div>
+      <div class="relative mx-auto max-w-[70ch] px-5 pt-20 pb-12 sm:pt-24 sm:pb-14">
+        {tags.length > 0 && (
+          <div class="flex flex-wrap gap-2 mb-5">
+            {tags.map((t) => <span class="badge badge-sm badge-outline border-base-content/20 text-base-content/70 uppercase tracking-wider text-[0.65rem] font-semibold">{t}</span>)}
+          </div>
+        )}
+        <h1 class="font-serif text-4xl sm:text-5xl leading-[1.1] font-[560] tracking-tight text-balance">{title}</h1>
+        <p class="mt-5 font-serif text-xl sm:text-[1.4rem] leading-snug text-base-content/70 text-pretty">{description}</p>
+        <div class="mt-7 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-base-content/55">
+          <span>{readingMinutes} min read</span>
+          {level && <span class="capitalize">· {level}</span>}
+          {dateLabel && <span>· {dateLabel}</span>}
+        </div>
+      </div>
+    </header>
+
+    <div class="mx-auto max-w-[78rem] px-5 xl:grid xl:grid-cols-[1fr_minmax(0,70ch)_1fr] xl:gap-10">
+      <aside class="hidden xl:block">
+        {toc.length > 0 && (
+          <nav id="toc" class="sticky top-10 mt-14 max-h-[calc(100vh-5rem)] overflow-y-auto pr-2 text-sm" aria-label="Table of contents">
+            <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-base-content/50">On this page</p>
+            <ul class="space-y-1.5 border-l border-base-300">
+              {toc.map((h) => (
+                <li>
+                  <a href={`#${h.slug}`} data-slug={h.slug}
+                     class:list={['toc-link block -ml-px border-l-2 border-transparent py-0.5 text-base-content/60 hover:text-base-content transition-colors', h.depth === 3 ? 'pl-7 text-[0.8rem]' : 'pl-4']}>
+                    {h.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+      </aside>
+
+      <main class="min-w-0">
+        {toc.length > 2 && (
+          <details class="xl:hidden mt-8 collapse collapse-arrow border border-base-300 bg-base-200/50 rounded-box">
+            <summary class="collapse-title text-sm font-semibold">Contents</summary>
+            <div class="collapse-content text-sm">
+              <ul class="space-y-1">
+                {toc.map((h) => <li class={h.depth === 3 ? 'pl-4' : ''}><a class="link link-hover" href={`#${h.slug}`}>{h.text}</a></li>)}
+              </ul>
+            </div>
+          </details>
+        )}
+        <article class="prose mx-auto pt-6 pb-24">
+          <slot />
+        </article>
+      </main>
+      <div class="hidden xl:block"></div>
+    </div>
+
+    <footer class="border-t border-base-300 py-8 text-center text-xs text-base-content/45">
+      Generated with <span class="font-semibold">explainer</span>{model && <> · {model}</>}
+    </footer>
+
+    <style>
+      .theme-icon-moon { display: none; }
+      :global([data-theme="ink"]) .theme-icon-moon { display: block; }
+      :global([data-theme="ink"]) .theme-icon-sun { display: none; }
+      .toc-link.active { color: var(--color-primary); border-color: var(--color-primary); font-weight: 550; }
+    </style>
+
+    <script>
+      // Theme toggle -> components listen for the `explainer:theme` event to re-render.
+      const root = document.documentElement;
+      document.getElementById('theme-toggle')?.addEventListener('click', () => {
+        const next = root.dataset.theme === 'ink' ? 'paper' : 'ink';
+        root.dataset.theme = next;
+        try { localStorage.setItem('explainer-theme', next); } catch {}
+        window.dispatchEvent(new CustomEvent('explainer:theme', { detail: next }));
+      });
+
+      // Reading progress bar
+      const bar = document.getElementById('progress');
+      const onScroll = () => {
+        const max = document.documentElement.scrollHeight - innerHeight;
+        if (bar) bar.style.transform = `scaleX(${max > 0 ? Math.min(1, scrollY / max) : 0})`;
+      };
+      addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+
+      // Table-of-contents scroll spy
+      const links = [...document.querySelectorAll<HTMLAnchorElement>('.toc-link')];
+      const targets = links.map((l) => document.getElementById(l.dataset.slug!)).filter(Boolean) as HTMLElement[];
+      const spy = () => {
+        let current = targets[0]?.id;
+        for (const t of targets) if (t.getBoundingClientRect().top < 120) current = t.id;
+        links.forEach((l) => l.classList.toggle('active', l.dataset.slug === current));
+      };
+      addEventListener('scroll', spy, { passive: true });
+      spy();
+    </script>
+  </body>
+</html>

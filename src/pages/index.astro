@@ -1,0 +1,20 @@
+---
+// Index of all explainers (only used with `npm run dev`).
+import { getCollection } from 'astro:content';
+import '../styles/global.css';
+const entries = (await getCollection('explainers')).sort((a, b) => (b.data.date?.getTime() ?? 0) - (a.data.date?.getTime() ?? 0));
+---
+<!doctype html>
+<html lang="en" data-theme="paper">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Explainers</title></head>
+  <body>
+    <main class="mx-auto max-w-2xl px-5 py-16">
+      <h1 class="font-serif text-4xl font-semibold mb-8">Explainers</h1>
+      <ul class="space-y-5">
+        {entries.map((e) => (
+          <li><a class="link link-hover font-serif text-xl" href={`/${e.id}`}>{e.data.title}</a><p class="text-base-content/65">{e.data.description}</p></li>
+        ))}
+      </ul>
+    </main>
+  </body>
+</html>

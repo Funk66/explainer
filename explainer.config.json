@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "baseUrl": "http://localhost:1235/v1",
+    "apiKey": "not-needed",
+    "model": "recursivesi/flint",
+    "reasoningEffort": "medium",
+    "temperature": 0.6,
+    "maxTokens": null,
+    "requestTimeoutSeconds": 1800,
+    "extraBody": {}
+  },
+  "agent": {
+    "maxSteps": 20,
+    "showReasoning": true
+  },
+  "output": {
+    "openInBrowser": true
+  }
+}

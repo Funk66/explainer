@@ -1,0 +1,14 @@
+---
+interface Props { title?: string; tone?: 'neutral' | 'good' | 'bad' | 'primary' | 'secondary' }
+const { title, tone = 'neutral' } = Astro.props;
+const colors = { neutral: 'var(--color-base-content)', good: 'var(--color-success)', bad: 'var(--color-error)', primary: 'var(--color-primary)', secondary: 'var(--color-secondary)' };
+---
+<div class="column rounded-box border border-base-300 bg-base-200/40 p-5" style={`--c:${colors[tone]}`}>
+  {title && <h4 class="not-prose font-serif text-lg font-semibold mb-2" style="color: var(--c)">{title}</h4>}
+  <div class="column-body"><slot /></div>
+</div>
+<style>
+  .column { border-top: 3px solid color-mix(in oklab, var(--c) 70%, transparent); }
+  .column-body > :global(:first-child) { margin-top: 0; }
+  .column-body > :global(:last-child) { margin-bottom: 0; }
+</style>

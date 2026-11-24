@@ -1,0 +1,5 @@
+---
+interface Props { tip: string }
+const { tip } = Astro.props;
+---
+<span class="tooltip tooltip-top cursor-help underline decoration-dotted decoration-base-content/40 underline-offset-4" data-tip={tip} tabindex="0"><slot /></span>
