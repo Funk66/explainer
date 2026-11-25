@@ -1,0 +1,34 @@
+# Example deployment: the explainer service + a private SearXNG instance for web search.
+#   1. Copy this folder to the server, adjust the environment below (or put a config.json in ./data).
+#   2. Replace the SearXNG secret in ./searxng/settings.yml.
+#   3. docker compose up -d   (or: podman compose up -d)
+# Then open http://<server>:8080 (from your LAN or VPN).
+services:
+  explainer:
+    image: ghcr.io/OWNER/explainer:latest   # ← your GitHub user/org (lowercase)
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data                         # explainers, job database, optional config.json — must be writable by uid 1000 (sudo chown 1000:1000 data)
+    environment:
+      EXPLAINER_BASE_URL: "http://laptop.lan:1234/v1"   # your OpenAI-compatible inference endpoint
+      EXPLAINER_MODEL: "qwen/qwen3.8-27b"
+      EXPLAINER_SEARCH_PROVIDER: "searxng,tavily"      # SearXNG first, Tavily as fallback (needs TAVILY_API_KEY)
+      SEARXNG_URL: "http://searxng:8080"
+      # TAVILY_API_KEY: "tvly-…"
+      PUBLIC_URL: "http://thinkcentre.lan:8080"          # used for links in notifications
+      # NTFY_URL: "https://ntfy.sh"
+      # NTFY_TOPIC: "my-explainers-<random>"
+      # NTFY_TOKEN: ""
+    depends_on:
+      - searxng
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080/"
+    # Not published: only the explainer service needs it. Add `ports: ["8888:8080"]` to use it yourself.

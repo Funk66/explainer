@@ -1,0 +1,15 @@
+.git
+node_modules
+data
+.build
+.astro
+dist-app
+fixtures/*/index.html
+fixtures/*/.check
+fixtures/*/meta.json
+explainers
+tavily
+*.key
+.env
+.env.*
+.DS_Store

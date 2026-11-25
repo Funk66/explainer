@@ -1,14 +1,15 @@
-// Tools exposed to the model. Every write/edit is immediately built and checked in a real browser,
-// so the model always gets concrete feedback (build errors with line numbers, render issues, stats).
+// The explainer file and the tools to write it. Every write/edit is immediately built and checked in
+// a real browser, so the model always gets concrete feedback (build errors with line numbers, render
+// issues, citation problems, stats).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { build } from '../scripts/build.ts';
 import { check, formatReport } from '../scripts/check.ts';
-import { paths } from '../scripts/lib/paths.ts';
+import type { ExplainerPaths } from '../scripts/lib/paths.ts';
+import type { Emit } from './events.ts';
 import type { Tool } from './llm.ts';
 import { citedUrls, Research, RESEARCH_TOOL_NAMES } from './research/index.ts';
-import * as ui from './ui.ts';
 
-const AUTHOR_TOOLS: Tool[] = [
+export const AUTHOR_TOOLS: Tool[] = [
   {
     type: 'function',
     function: {
@@ -67,23 +68,35 @@ const AUTHOR_TOOLS: Tool[] = [
   },
 ];
 
+export interface VerifyOptions {
+  /** Require at least one footnote citation when research is available (off while long-form sections are still being written). */
+  requireCitations?: boolean;
+  /** Target word range for the requested depth (a warning is given when far off). */
+  targetWords?: [number, number];
+}
+
 export class Workspace {
-  slug: string;
+  readonly p: ExplainerPaths;
   model: string;
   research: Research;
+  emit: Emit;
   passed = false;
   finished = false;
   summary = '';
-  private p: ReturnType<typeof paths>;
+  /** Stats of the last successful render check (words, visuals, citations, …). */
+  lastStats: Record<string, number> = {};
+  verifyOptions: VerifyOptions = { requireCitations: true };
 
-  constructor(slug: string, model: string, research: Research) {
-    this.slug = slug;
+  constructor(p: ExplainerPaths, model: string, research: Research, emit: Emit) {
+    this.p = p;
     this.model = model;
     this.research = research;
-    this.p = paths(slug);
+    this.emit = emit;
     mkdirSync(this.p.dir, { recursive: true });
     research.attachLedger(this.p.sources);
   }
+
+  get slug() { return this.p.slug; }
 
   /** Tools offered in the current state: reading/editing only once a file exists. Research tools first. */
   get tools(): Tool[] {
@@ -121,7 +134,7 @@ export class Workspace {
     const normalized = normalize(content, this.model);
     if (normalized.error) return `ERROR: ${normalized.error}`;
     writeFileSync(this.p.mdx, normalized.text);
-    ui.line(ui.dim(`  saved ${this.p.mdx.replace(process.cwd() + '/', '')} (${normalized.text.split('\n').length} lines)`));
+    this.emit({ type: 'note', level: 'info', text: `saved index.mdx (${normalized.text.split('\n').length} lines)` });
     return this.verify();
   }
 
@@ -140,7 +153,7 @@ export class Workspace {
     const normalized = normalize(text, this.model);
     if (normalized.error) return `ERROR: ${normalized.error} No edits were applied.`;
     writeFileSync(this.p.mdx, normalized.text);
-    ui.line(ui.dim(`  applied ${edits.length} edit(s)`));
+    this.emit({ type: 'note', level: 'info', text: `applied ${edits.length} edit(s)` });
     return this.verify();
   }
 
@@ -161,16 +174,14 @@ export class Workspace {
 
   async verify(): Promise<string> {
     this.passed = false;
-    ui.status(ui.dim('  building…'));
-    const b = await build(this.slug);
+    this.emit({ type: 'status', text: 'building…' });
+    const b = await build(this.p);
     if (!b.ok) {
-      ui.clearStatus();
-      ui.line(ui.red('  ✗ build failed'));
+      this.emit({ type: 'build', ok: false, issues: 1, warnings: 0, detail: 'build failed' });
       return `BUILD FAILED — fix this and try again (line numbers refer to the MDX file, including frontmatter):\n\n${b.error}`;
     }
-    ui.status(ui.dim('  checking render in headless browser…'));
-    const r = await check(this.slug);
-    ui.clearStatus();
+    this.emit({ type: 'status', text: 'checking render in headless browser…' });
+    const r = await check(this.p);
 
     // Citations: every URL in the text must have come up during research (prevents invented URLs).
     const mdx = this.read();
@@ -188,18 +199,24 @@ export class Workspace {
     if (unusedDefs.length) r.warnings.push(`Footnote definitions never referenced in the text (they are dropped): ${unusedDefs.map((x) => `[^${x}]`).join(', ')}`);
     const footnotes = defs.size;
     r.stats.citations = footnotes;
-    if (this.research.enabled && footnotes === 0) {
+    if (this.research.enabled && footnotes === 0 && this.verifyOptions.requireCitations !== false) {
       r.ok = false;
       r.issues.push('No sources cited. Add footnote citations ([^label] after the claim, definitions at the end of the file) for the key facts and figures, using URLs from your research.');
     }
+    const t = this.verifyOptions.targetWords;
+    if (t && r.stats.words) {
+      if (r.stats.words < t[0] * 0.8) r.warnings.push(`Too short for the requested depth: ${r.stats.words} words, target ${t[0]}–${t[1]}. Add depth (mechanisms, examples, misconceptions), not filler.`);
+      else if (r.stats.words > t[1] * 1.3) r.warnings.push(`Longer than the requested depth: ${r.stats.words} words, target ${t[0]}–${t[1]}. Consider tightening.`);
+    }
     this.passed = r.ok;
-    ui.line(r.ok ? ui.green(`  ✓ build + render check passed`) + ui.dim(` (${r.warnings.length} warning(s))`) : ui.red(`  ✗ render check: ${r.issues.length} issue(s)`));
+    if (r.ok) this.lastStats = r.stats;
+    this.emit({ type: 'build', ok: r.ok, issues: r.issues.length, warnings: r.warnings.length, detail: r.ok ? undefined : `render check: ${r.issues.length} issue(s)` });
     return `BUILD OK.\n${formatReport(r)}\n\n${r.ok ? (r.warnings.length ? 'Consider the warnings; fix them if reasonable, then call finish.' : 'Everything passed. Call finish (or improve the content first if needed).') : 'Fix every issue, then the file will be checked again.'}`;
   }
 }
 
 /** Light clean-up of common model mistakes + automatic metadata. */
-function normalize(input: string, model: string): { text: string; error?: string } {
+export function normalize(input: string, model: string): { text: string; error?: string } {
   let text = input.replace(/\r\n/g, '\n').trim();
   // Unwrap ```mdx … ``` if the whole file was fenced
   const fenced = /^```(?:mdx|markdown|md)?\n([\s\S]*?)\n```$/.exec(text);

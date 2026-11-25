@@ -1,0 +1,29 @@
+# Minimal SearXNG settings for the explainer agent.
+use_default_settings: true
+
+server:
+  secret_key: "CHANGE-ME-to-a-long-random-string"   # e.g. `openssl rand -hex 32`
+  limiter: false          # private instance, only used by the explainer service
+  image_proxy: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json                # required: the agent uses the JSON API
+
+# Engines that tend to give good results for technical/educational topics. Enabling several means a
+# temporarily blocked engine (Google often rate-limits scrapers) doesn't leave you without results.
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: arxiv
+    disabled: false

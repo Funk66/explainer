@@ -20,6 +20,20 @@ for (const p of params) {
   if (!/^[A-Za-z_]\w*$/.test(p.name) || p.name === 'x') throw new Error(`<FunctionPlot> param name "${p.name}" must be a simple identifier other than "x".`);
   if (!(p.min <= p.value && p.value <= p.max)) throw new Error(`<FunctionPlot> param "${p.name}": value ${p.value} must be between min ${p.min} and max ${p.max}.`);
 }
+// Expressions are evaluated in the browser, so only allow maths: numbers, operators, x, the
+// declared params and Math functions/constants (no property access, strings or other names).
+const MATH_NAMES = new Set(Object.getOwnPropertyNames(Math));
+const allowed = new Set(['x', ...params.map((p) => p.name)]);
+for (const c of curves) {
+  if (typeof c.expr !== 'string' || !c.expr.trim()) throw new Error('<FunctionPlot> every curve needs a non-empty expr string.');
+  const expr = c.expr.replace(/\bMath\.(?=[A-Za-z_])/g, ''); // "Math.exp(x)" is fine too
+  if (/[^\w\s.+\-*/%^(),<>=!?:&|]/.test(expr) || /\.\s*[A-Za-z_]/.test(expr)) {
+    throw new Error(`<FunctionPlot> expression "${c.expr}" may only contain numbers, operators, parentheses, x, the params and Math functions (e.g. sin(x), exp(-a*x), PI).`);
+  }
+  for (const id of expr.match(/[A-Za-z_]\w*/g) ?? []) {
+    if (!allowed.has(id) && !MATH_NAMES.has(id)) throw new Error(`<FunctionPlot> expression "${c.expr}" uses unknown name "${id}". Allowed: x, ${[...allowed].filter((n) => n !== 'x').join(', ') || '(no params)'} and Math functions/constants (sin, cos, exp, log, sqrt, abs, pow, PI, E…).`);
+  }
+}
 const config = { curves, params, x, y, samples, xLabel, yLabel };
 ---
 <figure class="not-prose my-8 rounded-box border border-base-300 bg-base-200/30 p-4 sm:p-5" data-component="function-plot" data-state="pending" data-config={JSON.stringify(config)}>

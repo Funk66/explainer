@@ -1,5 +1,16 @@
 node_modules/
 .astro/
 .build/
-explainers/
+dist-app/
+# Generated content (the data volume in production)
+/data/
+# Fixtures: only the MDX sources are tracked
+fixtures/*/*
+!fixtures/*/index.mdx
 .DS_Store
+
+# Secrets (never commit)
+/tavily
+*.key
+.env
+.env.*

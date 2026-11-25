@@ -9,10 +9,12 @@ syntax highlighting, math rendering and every interactive widget are already bui
 
 | What | Where / how |
 |---|---|
-| Your file | `explainers/<slug>/index.mdx` (one folder per explainer, `slug` = kebab-case) |
-| Build | `npm run build -- <slug>` → `explainers/<slug>/<slug>.html` (one standalone file) |
-| Verify | `npm run check -- <slug>` → opens the page in headless Chromium, reports JS / diagram / chart / math errors and layout problems, saves screenshots to `explainers/<slug>/.check/` |
-| Reference | `explainers/showcase/index.mdx` uses every component and is known to render correctly |
+| Your file | `data/explainers/<slug>/index.mdx` (one folder per explainer, `slug` = kebab-case) |
+| Build | `npm run build -- <slug>` → `data/explainers/<slug>/index.html` (one standalone file) |
+| Verify | `npm run check -- <slug>` → opens the page in headless Chromium, reports JS / diagram / chart / math errors and layout problems, saves screenshots to `.check/` in the explainer folder |
+| Reference | `fixtures/showcase/index.mdx` uses every component and is known to render correctly |
+
+(The built-in agents use tools that build and check automatically after every write.)
 
 An explainer is only done when **build succeeds and check passes with no issues**.
 
@@ -48,7 +50,7 @@ Three to five sentences that summarise the whole explainer.
 7. **Check understanding.** Put 2–4 `<Quiz>` questions near the end of major sections, `<Reveal>` for "think first, then look" prompts, and `<Flashcards>` for key vocabulary at the end.
 8. **Applicability.** If the prompt mentions a context ("…and its applicability to Y"), dedicate at least one full section to it, with concrete use cases, limitations and when *not* to use it (`<Columns>` works well for trade-offs).
 9. **Finish** with a "Key takeaways" section (short bullet list) and optionally "Going further" (names of papers, books, tools — no fabricated URLs).
-10. Length: typically **1,500–3,500 words**. Accuracy beats length: never invent facts, numbers, citations or URLs. If a number is illustrative, say so.
+10. Length: follow the **target length** in your task (it depends on the requested depth, from a 5-minute overview to an hour-long deep dive). Accuracy beats length: never invent facts, numbers, citations or URLs. If a number is illustrative, say so.
 11. **Verify before you write.** Check specific facts (numbers, dates, names, standards, how real systems work) against authoritative sources — official docs, standards, Wikipedia, textbooks, primary papers — and cite them (see *Citations*). If you can't verify something, leave it out or mark it as approximate.
 12. Tone: clear, warm, precise. Short paragraphs. Define every term on first use (`<Term>` or `<Definition>`).
 

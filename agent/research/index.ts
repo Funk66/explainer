@@ -1,13 +1,14 @@
 // Research tools for the agent: web_search, search_wikipedia, fetch_page — plus a ledger of every
 // source seen, so the explainer can only cite URLs that actually came up during research.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { Tool } from '../llm.ts';
 import { fetchPage, fetchViaJina, fetchViaTavily, type FetchedPage } from './fetch-page.ts';
 import { focusedExcerpts } from './focus.ts';
 import { searxng } from './searxng.ts';
 import { tavily } from './tavily.ts';
 import type { ResearchConfig, SearchProvider, SearchProviderName, SearchResult } from './types.ts';
-import { hostOf, matchesDomain, normalizeUrl } from './util.ts';
+import { hostOf, matchesDomain, normalizeUrl, trimUrl } from './util.ts';
 import { searchWikipedia } from './wikipedia.ts';
 
 export type { ResearchConfig } from './types.ts';
@@ -23,6 +24,20 @@ export class Research {
   private pages = new Map<string, FetchedPage>();
   private ledgerFile: string | null = null;
   stats = { searches: 0, fetches: 0 };
+  /** Earlier searches (per tool) with their results: repeats are answered from here at no cost. */
+  private history: { tool: string; terms: Set<string>; result: string }[] = [];
+  /** Per-agent budget of paid web searches (null = unlimited) and usage, reset by beginRun(). */
+  private budget: number | null = null;
+  private used = 0;
+  /** Cap on paid web searches for the whole explainer run (all agents together). */
+  private jobLimit: number | null = null;
+  private jobUsed = 0;
+  /** Persistent cache of web search results (shared across runs: retries and re-checks don't pay twice). */
+  private cacheFile: string | null = null;
+  private cache: Record<string, { at: string; result: string }> = {};
+  /** Consecutive repeated searches; after a few, search tools are withdrawn for the rest of the run. */
+  private repeatStreak = 0;
+  private searchWithdrawn = false;
 
   constructor(cfg: ResearchConfig) {
     this.cfg = cfg;
@@ -31,6 +46,25 @@ export class Research {
   }
 
   get enabled() { return this.providers.length > 0 || this.cfg.wikipedia; }
+
+  /** Limit paid web searches for the whole explainer run. */
+  setJobLimit(limit: number | null) { this.jobLimit = limit; this.jobUsed = 0; }
+
+  /** Use a persistent search cache file (entries expire after 30 days). */
+  attachCache(file: string) {
+    this.cacheFile = file;
+    try { this.cache = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}; } catch { this.cache = {}; }
+    const cutoff = Date.now() - 30 * 86400_000;
+    for (const [k, v] of Object.entries(this.cache)) if (Date.parse(v.at) < cutoff) delete this.cache[k];
+  }
+
+  /** Start a new agent run with its own budget of paid web searches (repeats and Wikipedia are free). */
+  beginRun(searchBudget: number | null) {
+    this.budget = searchBudget;
+    this.used = 0;
+    this.repeatStreak = 0;
+    this.searchWithdrawn = false;
+  }
   /** Human-readable description, e.g. "searxng → tavily". */
   get searchLabel() { return this.providers.map((p) => p.name).join(' → '); }
 
@@ -43,11 +77,13 @@ export class Research {
   }
 
   isKnown(url: string) { return this.ledger.has(normalizeUrl(url)); }
+  /** Ledger entry (title as seen in search results or on the fetched page) for a URL. */
+  lookup(url: string) { return this.ledger.get(normalizeUrl(url)) ?? null; }
   get sources() { return [...this.ledger.values()]; }
 
   tools(): Tool[] {
     const t: Tool[] = [];
-    if (this.providers.length) t.push({
+    if (this.providers.length && !this.searchWithdrawn) t.push({
       type: 'function',
       function: {
         name: 'web_search',
@@ -55,7 +91,7 @@ export class Research {
         parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       },
     });
-    if (this.cfg.wikipedia) t.push({
+    if (this.cfg.wikipedia && !this.searchWithdrawn) t.push({
       type: 'function',
       function: {
         name: 'search_wikipedia',
@@ -95,9 +131,49 @@ export class Research {
     }
   }
 
+  /** Repeated / near-identical queries and budget exhaustion are answered without calling any API. */
+  private guard(tool: string, query: string, paid: boolean): string | null {
+    const terms = queryTerms(query);
+    const prev = this.history.find((h) => h.tool === tool && similarity(h.terms, terms) >= 0.7);
+    if (prev) {
+      if (++this.repeatStreak >= 3) {
+        this.searchWithdrawn = true;
+        return 'ERROR: you keep repeating searches you already ran, so searching is now disabled for this task. Use fetch_page on pages you already found (they are cached), and continue with your task.';
+      }
+      return `(You already ran a search like this — here are the same results again. Don't keep rephrasing the same search: read one of these pages with fetch_page, search for a genuinely different aspect, or move on.)\n\n${prev.result}`;
+    }
+    this.repeatStreak = 0;
+    if (!paid) return null;
+    if (this.jobLimit !== null && this.jobUsed >= this.jobLimit) {
+      return `ERROR: the web search limit for this explainer is used up (${this.jobLimit} searches). Use search_wikipedia (if available) or read pages you already found with fetch_page (they are cached), then continue with your task.`;
+    }
+    if (this.budget !== null && this.used >= this.budget) {
+      return `ERROR: the web search budget for this task is used up (${this.budget} searches). Use search_wikipedia (if available) or read pages you already found with fetch_page (they are cached), then continue with your task.`;
+    }
+    return null;
+  }
+
+  private recordSearch(tool: string, query: string, result: string, paid: boolean) {
+    if (paid) { this.used++; this.jobUsed++; }
+    this.history.push({ tool, terms: queryTerms(query), result });
+  }
+
+  /** Searches that actually reached a paid/external search API in this run. */
+  get paidSearches() { return this.jobUsed; }
+
   private async webSearch(query: string): Promise<string> {
     if (!this.providers.length) return 'ERROR: web search is disabled (research.provider = "none").';
     if (!query.trim()) return 'ERROR: empty query';
+    const cached = this.guard('web', query, true);
+    if (cached) return cached;
+    const cacheKey = `${this.searchLabel}|${[...queryTerms(query)].sort().join(' ')}`;
+    const hit = this.cache[cacheKey];
+    if (hit) {
+      this.history.push({ tool: 'web', terms: queryTerms(query), result: hit.result });
+      // Results from the cache count as "seen" (citable), just like fresh ones.
+      for (const m of hit.result.matchAll(/^\d+\. (.*?) — [^\n]*\n {3}(https?:\/\/\S+)$/gm)) this.remember([{ title: m[1], url: m[2], snippet: '' }], `cache: ${query}`);
+      return hit.result;
+    }
     this.stats.searches++;
     const problems: string[] = [];
     for (const provider of this.providers) {
@@ -106,7 +182,10 @@ export class Research {
         if (results.length === 0) { problems.push(`${provider.name}: no results`); continue; }
         this.remember(results, `${provider.name}: ${query}`);
         const note = problems.length ? ` (via ${provider.name}; ${problems.join('; ')})` : '';
-        return formatResults(`Web results for "${query}"${note}`, results, this.cfg.preferredDomains);
+        const out = formatResults(`Web results for "${query}"${note}`, results, this.cfg.preferredDomains);
+        this.recordSearch('web', query, out, true);
+        this.storeCache(cacheKey, out);
+        return out;
       } catch (err: any) {
         problems.push(`${provider.name} failed: ${err?.message ?? err}`);
       }
@@ -117,10 +196,14 @@ export class Research {
 
   private async wikipedia(query: string): Promise<string> {
     if (!query.trim()) return 'ERROR: empty query';
+    const cached = this.guard('wikipedia', query, false);
+    if (cached) return cached;
     this.stats.searches++;
     const results = await searchWikipedia(query, this.cfg.wikipediaLanguage, Math.min(this.cfg.maxResults, 8), this.cfg.fetch.timeoutSeconds * 1000);
     this.remember(results, `wikipedia: ${query}`);
-    return formatResults(`Wikipedia results for "${query}"`, results, []);
+    const out = formatResults(`Wikipedia results for "${query}"`, results, []);
+    this.recordSearch('wikipedia', query, out, false);
+    return out;
   }
 
   private async fetch(url: string, offset: number, focus: string): Promise<string> {
@@ -179,6 +262,17 @@ export class Research {
     }
   }
 
+  private storeCache(key: string, result: string) {
+    if (!this.cacheFile) return;
+    this.cache[key] = { at: new Date().toISOString(), result };
+    const keys = Object.keys(this.cache);
+    if (keys.length > 5000) for (const k of keys.slice(0, keys.length - 5000)) delete this.cache[k];
+    try {
+      mkdirSync(path.dirname(this.cacheFile), { recursive: true });
+      writeFileSync(this.cacheFile, JSON.stringify(this.cache));
+    } catch { /* cache is best effort */ }
+  }
+
   private save() {
     if (this.ledgerFile) writeFileSync(this.ledgerFile, JSON.stringify(this.sources, null, 2) + '\n');
   }
@@ -197,9 +291,24 @@ function formatResults(header: string, results: SearchResult[], preferred: strin
 /** URLs that appear in the MDX (outside code blocks). */
 export function citedUrls(mdx: string): string[] {
   const text = mdx.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
-  return [...new Set((text.match(/https?:\/\/[^\s<>"'`)\]}]+/g) ?? []).map((u) => u.replace(/[.,;:!?]+$/, '')))];
+  return [...new Set((text.match(/https?:\/\/[^\s<>"'`\]}]+/g) ?? []).map(trimUrl))];
 }
 
 function badProvider(name: string): never {
   throw new Error(`Unknown research.provider "${name}" (use "searxng", "tavily", "none" or a list such as ["searxng", "tavily"])`);
+}
+
+const QUERY_STOP = new Set('a an the of to and or in on for with by is are was what how why when which does do vs explained explanation'.split(' '));
+
+/** Content words of a query, ignoring quotes, OR operators and filler words. */
+function queryTerms(q: string): Set<string> {
+  return new Set(q.toLowerCase().replace(/\bor\b/g, ' ').match(/[a-z0-9]+(?:[.-][a-z0-9]+)*/g)?.filter((w) => w.length > 1 && !QUERY_STOP.has(w)) ?? []);
+}
+
+/** Overlap of two term sets relative to the smaller one (so a query that only adds words still counts as a repeat). */
+function similarity(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let common = 0;
+  for (const t of a) if (b.has(t)) common++;
+  return common / Math.min(a.size, b.size);
 }

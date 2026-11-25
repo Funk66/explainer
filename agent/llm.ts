@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 import { Agent, fetch as undiciFetch } from 'undici';
 import type { Config } from './config.ts';
-import * as ui from './ui.ts';
+import type { Emit } from './events.ts';
 
 export type Message = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 export type Tool = OpenAI.Chat.Completions.ChatCompletionFunctionTool;
@@ -23,7 +23,7 @@ export function createClient(cfg: Config) {
   });
 }
 
-export async function complete(client: OpenAI, cfg: Config, messages: Message[], tools: Tool[], toolChoice: 'auto' | 'required' = 'auto'): Promise<Completion> {
+export async function complete(client: OpenAI, cfg: Config, messages: Message[], tools: Tool[], emit: Emit, toolChoice: 'auto' | 'required' = 'auto', signal?: AbortSignal): Promise<Completion> {
   const body: Record<string, unknown> = {
     model: cfg.llm.model,
     messages,
@@ -37,62 +37,46 @@ export async function complete(client: OpenAI, cfg: Config, messages: Message[],
   if (cfg.llm.reasoningEffort != null) body.reasoning_effort = cfg.llm.reasoningEffort;
   Object.assign(body, cfg.llm.extraBody);
 
-  const stream = (await client.chat.completions.create(body as any)) as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+  const stream = (await client.chat.completions.create(body as any, { signal })) as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
 
   let content = '';
   let reasoning = '';
   let finishReason: string | null = null;
   let usage: Completion['usage'];
   const calls: { id: string; name: string; arguments: string }[] = [];
-  let mode: 'none' | 'reasoning' | 'content' | 'tool' = 'none';
 
-  // Heartbeat: show elapsed time whenever the server is silent for a while.
+  // Heartbeat: report elapsed time whenever the server is silent for a while.
   let lastChunk = Date.now();
   const t0 = Date.now();
   const heartbeat = setInterval(() => {
     const idle = (Date.now() - lastChunk) / 1000;
-    if (idle > 5) ui.status(ui.dim(`  … waiting for the model (${Math.round((Date.now() - t0) / 1000)}s elapsed, ${Math.round(idle)}s since last output)`));
+    if (idle > 5) emit({ type: 'waiting', elapsedSeconds: Math.round((Date.now() - t0) / 1000), idleSeconds: Math.round(idle) });
   }, 1000);
 
   try {
-  for await (const chunk of stream) {
-    if (Date.now() - lastChunk > 5000) ui.clearStatus();
-    lastChunk = Date.now();
-    if (chunk.usage) usage = chunk.usage as any;
-    const choice = chunk.choices?.[0];
-    if (!choice) continue;
-    const delta = choice.delta as any;
-    const r: string | undefined = delta.reasoning_content ?? delta.reasoning;
-    if (r) {
-      reasoning += r;
-      if (cfg.agent.showReasoning) {
-        if (mode !== 'reasoning') { ui.clearStatus(); ui.write(ui.dim('\n💭 ')); mode = 'reasoning'; }
-        ui.write(ui.dim(r));
-      } else {
-        ui.status(ui.dim(`  thinking… ${reasoning.length.toLocaleString()} chars`));
+    for await (const chunk of stream) {
+      lastChunk = Date.now();
+      if (chunk.usage) usage = chunk.usage as any;
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      const delta = choice.delta as any;
+      const r: string | undefined = delta.reasoning_content ?? delta.reasoning;
+      if (r) { reasoning += r; emit({ type: 'reasoning', text: r }); }
+      if (delta.content) { content += delta.content; emit({ type: 'content', text: delta.content }); }
+      for (const tc of delta.tool_calls ?? []) {
+        const i = tc.index ?? 0;
+        calls[i] ??= { id: '', name: '', arguments: '' };
+        if (tc.id) calls[i].id = tc.id;
+        if (tc.function?.name) calls[i].name += tc.function.name;
+        if (tc.function?.arguments) calls[i].arguments += tc.function.arguments;
+        emit({ type: 'tool-progress', name: calls[i].name || 'tool', bytes: calls[i].arguments.length });
       }
+      if (choice.finish_reason) finishReason = choice.finish_reason;
     }
-    if (delta.content) {
-      content += delta.content;
-      if (mode !== 'content') { ui.clearStatus(); if (content.trim()) ui.write('\n'); mode = 'content'; }
-      ui.write(delta.content);
-    }
-    for (const tc of delta.tool_calls ?? []) {
-      const i = tc.index ?? 0;
-      calls[i] ??= { id: '', name: '', arguments: '' };
-      if (tc.id) calls[i].id = tc.id;
-      if (tc.function?.name) calls[i].name += tc.function.name;
-      if (tc.function?.arguments) calls[i].arguments += tc.function.arguments;
-      if (mode !== 'tool') { ui.write('\n'); mode = 'tool'; }
-      ui.status(ui.cyan(`  → ${calls[i].name || 'tool'} `) + ui.dim(`(${(calls[i].arguments.length / 1024).toFixed(1)} KB streamed)`));
-    }
-    if (choice.finish_reason) finishReason = choice.finish_reason;
-  }
   } finally {
     clearInterval(heartbeat);
+    emit({ type: 'stream-end' });
   }
-  ui.clearStatus();
-  if (mode === 'reasoning' || mode === 'content') ui.write('\n');
 
   let toolCalls = calls.filter(Boolean).map((c, i) => ({ ...c, id: c.id || `call_${Date.now()}_${i}` }));
   // Some local chat templates leak tool calls into the text as <tool_call>{...}</tool_call>.

@@ -1,14 +1,17 @@
 import { defineCollection } from 'astro:content';
 import { glob } from 'astro/loaders';
 import { z } from 'astro/zod';
+import path from 'node:path';
 
-// When EXPLAINER_SLUG is set (the normal build path) only that explainer is compiled,
-// so a broken draft elsewhere can never break the build of the one you asked for.
+// scripts/build.ts sets EXPLAINER_CONTENT_DIR (the folder that contains explainer folders) and
+// EXPLAINER_SLUG, so exactly one explainer is compiled and a broken draft elsewhere can't break it.
+// Without them (`npm run dev`) every explainer in the data directory is served.
+const contentDir = process.env.EXPLAINER_CONTENT_DIR ?? path.resolve(process.env.EXPLAINER_DATA_DIR ?? './data', 'explainers');
 const only = process.env.EXPLAINER_SLUG;
 
 const explainers = defineCollection({
   loader: glob({
-    base: './explainers',
+    base: contentDir,
     pattern: only ? `${only}/index.mdx` : '*/index.mdx',
     generateId: ({ entry }) => entry.split('/')[0],
   }),

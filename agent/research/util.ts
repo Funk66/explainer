@@ -46,3 +46,12 @@ export async function fetchWithTimeout(url: string, init: RequestInit & { timeou
 
 /** Generic, non-identifying client name for outgoing requests. */
 export const USER_AGENT = 'Mozilla/5.0 (compatible; explainer-research/1.0)';
+
+/** Trim punctuation that ends a sentence rather than the URL, keeping balanced parentheses
+ *  (e.g. https://en.wikipedia.org/wiki/Encapsulation_(networking) stays intact). */
+export function trimUrl(u: string): string {
+  let url = u.replace(/[.,;:!?'"]+$/, '');
+  const count = (c: string) => url.split(c).length - 1;
+  while (url.endsWith(')') && count(')') > count('(')) url = url.slice(0, -1).replace(/[.,;:!?'"]+$/, '');
+  return url;
+}

@@ -1,12 +1,12 @@
-// Usage: node scripts/check.ts <slug> [--json]
+// Usage: node scripts/check.ts <slug | path/to/explainer> [--json]
 // Opens the built standalone HTML in headless Chromium and verifies that it really renders:
 // no JS errors, no network requests, every diagram/chart/widget initialised, no math errors,
-// no horizontal overflow on mobile. Saves desktop + mobile screenshots to explainers/<slug>/.check/
+// no horizontal overflow on mobile. Saves desktop + mobile screenshots to <explainer>/.check/
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Page } from 'playwright';
-import { paths, requireSlug } from './lib/paths.ts';
+import { type ExplainerPaths, requireTarget } from './lib/paths.ts';
 
 export interface CheckReport {
   ok: boolean;
@@ -16,8 +16,7 @@ export interface CheckReport {
   screenshots: string[];
 }
 
-export async function check(slug: string): Promise<CheckReport> {
-  const p = paths(slug);
+export async function check(p: ExplainerPaths): Promise<CheckReport> {
   const issues: string[] = [];
   const warnings: string[] = [];
   const screenshots: string[] = [];
@@ -158,8 +157,7 @@ export function formatReport(r: CheckReport): string {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const slug = requireSlug(process.argv[2]);
-  const r = await check(slug);
+  const r = await check(requireTarget(process.argv[2]));
   console.log(process.argv.includes('--json') ? JSON.stringify(r, null, 2) : formatReport(r));
   if (!process.argv.includes('--json')) console.log(`Screenshots: ${r.screenshots.map((s) => path.relative(process.cwd(), s)).join(', ')}`);
   process.exit(r.ok ? 0 : 1);

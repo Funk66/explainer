@@ -1,0 +1,59 @@
+---
+// The web UI of the self-hosted service (a static single-page app; built with `npm run build:app`).
+import 'katex/dist/katex.min.css';
+import '../styles/global.css';
+---
+<!doctype html>
+<html lang="en" data-theme="paper">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f8f6f1" />
+    <title>Explainers</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23344aa0'/%3E%3Cpath d='M9 9h14M9 16h10M9 23h7' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <script is:inline>
+      (() => {
+        let t = null;
+        try { t = localStorage.getItem('explainer-theme'); } catch {}
+        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'ink' : 'paper';
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+  </head>
+  <body class="min-h-screen">
+    <header class="sticky top-0 z-30 border-b border-base-300 bg-base-100/85 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+        <a href="#/" class="flex items-center gap-2 font-serif text-xl font-semibold tracking-tight">
+          <span class="grid size-8 place-items-center rounded-lg bg-primary text-primary-content">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 6h14M5 12h10M5 18h7"/></svg>
+          </span>
+          Explainers
+        </a>
+        <nav class="ml-2 hidden gap-1 sm:flex">
+          <a href="#/" data-nav="library" class="btn btn-ghost btn-sm">Library</a>
+          <a href="#/jobs" data-nav="jobs" class="btn btn-ghost btn-sm">Queue <span id="queue-count" class="badge badge-sm badge-primary hidden"></span></a>
+        </nav>
+        <div class="flex-1"></div>
+        <a href="#/jobs" id="running-pill" class="hidden max-w-[16rem] items-center gap-2 truncate rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary sm:flex">
+          <span class="loading loading-ring loading-xs"></span><span id="running-text" class="truncate"></span>
+        </a>
+        <a href="#/new" class="btn btn-primary btn-sm">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="hidden sm:inline">New explainer</span>
+        </a>
+        <button id="theme-toggle" class="btn btn-ghost btn-circle btn-sm" aria-label="Toggle dark mode">
+          <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+        </button>
+      </div>
+      <nav class="flex border-t border-base-300 sm:hidden">
+        <a href="#/" data-nav="library" class="flex-1 py-2 text-center text-sm">Library</a>
+        <a href="#/jobs" data-nav="jobs" class="flex-1 py-2 text-center text-sm">Queue <span id="queue-count-m" class="badge badge-xs badge-primary hidden"></span></a>
+      </nav>
+    </header>
+    <main id="view" class="mx-auto max-w-6xl px-4 pb-24 pt-6"></main>
+    <div id="toast" class="toast toast-end z-50"></div>
+    <script>
+      import '../app/main.ts';
+    </script>
+  </body>
+</html>

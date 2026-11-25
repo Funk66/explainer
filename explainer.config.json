@@ -11,7 +11,13 @@
   },
   "agent": {
     "maxSteps": 60,
-    "showReasoning": true
+    "showReasoning": true,
+    "defaultDepth": "standard"
+  },
+  "factCheck": {
+    "enabled": true,
+    "model": null,
+    "maxSteps": 40
   },
   "output": {
     "openInBrowser": true
@@ -32,6 +38,12 @@
     },
     "jina": {
       "apiKey": null
+    },
+    "searchLimits": {
+      "overview": 12,
+      "standard": 25,
+      "deep": 50,
+      "comprehensive": 80
     },
     "maxResults": 8,
     "preferredDomains": [
@@ -61,5 +73,18 @@
       "timeoutSeconds": 20,
       "fallback": "jina"
     }
+  },
+  "server": {
+    "port": 8080,
+    "publicUrl": null,
+    "jobRetries": 2
+  },
+  "notifications": {
+    "ntfy": {
+      "url": null,
+      "topic": null,
+      "token": null
+    },
+    "eachJob": true
   }
 }

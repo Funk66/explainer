@@ -34,6 +34,8 @@ export interface ResearchConfig {
     apiKey: string | null;
     searchDepth: 'basic' | 'advanced';
   };
+  /** Max paid web searches per explainer run (writing + fact-check together), by depth. Repeats, cache hits and Wikipedia are free. */
+  searchLimits: { overview: number; standard: number; deep: number; comprehensive: number };
   /** Results per search returned to the model. */
   maxResults: number;
   /** Results from these domains (and subdomains) are ranked first. */

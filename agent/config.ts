@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { ROOT } from '../scripts/lib/paths.ts';
+import { DATA_DIR, ROOT } from '../scripts/lib/paths.ts';
+import type { Depth } from '../scripts/lib/meta.ts';
 import type { ResearchConfig } from './research/types.ts';
 
 export interface Config {
@@ -18,13 +19,41 @@ export interface Config {
     extraBody: Record<string, unknown>;
   };
   agent: {
+    /** Max model turns per agent (writer, each section writer, fact-checker, …). */
     maxSteps: number;
     showReasoning: boolean;
+    /** Depth used when none is requested: overview | standard | deep | comprehensive. */
+    defaultDepth: Depth;
+  };
+  factCheck: {
+    /** Run a fresh-context fact-check (and a fix pass) after writing. */
+    enabled: boolean;
+    /** Model for the fact-checker; null = same as llm.model. A different model gives an independent opinion. */
+    model: string | null;
+    maxSteps: number;
   };
   output: {
     openInBrowser: boolean;
   };
   research: ResearchConfig;
+  server: {
+    port: number;
+    /** Base URL the service is reached at (e.g. http://thinkcentre:8080), used for links in notifications. */
+    publicUrl: string | null;
+    /** Automatic retries for a failed job (e.g. inference endpoint unreachable), with growing delays. */
+    jobRetries: number;
+  };
+  notifications: {
+    ntfy: {
+      /** ntfy server, e.g. https://ntfy.sh or your self-hosted instance; null disables notifications. */
+      url: string | null;
+      topic: string | null;
+      /** Access token for protected topics (env NTFY_TOKEN). */
+      token: string | null;
+    };
+    /** Notify when each job finishes (otherwise only batch summaries and failures). */
+    eachJob: boolean;
+  };
 }
 
 const DEFAULTS: Config = {
@@ -38,8 +67,11 @@ const DEFAULTS: Config = {
     requestTimeoutSeconds: 1800,
     extraBody: {},
   },
-  agent: { maxSteps: 60, showReasoning: true },
+  agent: { maxSteps: 60, showReasoning: true, defaultDepth: 'standard' },
+  factCheck: { enabled: true, model: null, maxSteps: 40 },
   output: { openInBrowser: true },
+  server: { port: 8080, publicUrl: null, jobRetries: 2 },
+  notifications: { ntfy: { url: null, topic: null, token: null }, eachJob: true },
   research: {
     provider: 'none',
     wikipedia: true,
@@ -47,6 +79,7 @@ const DEFAULTS: Config = {
     searxng: { url: 'http://localhost:8080', engines: null, categories: null, language: 'en' },
     tavily: { apiKey: null, searchDepth: 'basic' },
     jina: { apiKey: null },
+    searchLimits: { overview: 12, standard: 25, deep: 50, comprehensive: 80 },
     maxResults: 8,
     preferredDomains: [],
     blockedDomains: [],
@@ -54,7 +87,9 @@ const DEFAULTS: Config = {
   },
 };
 
-export const CONFIG_PATH = process.env.EXPLAINER_CONFIG ?? path.join(ROOT, 'explainer.config.json');
+// Config file: EXPLAINER_CONFIG, else <data dir>/config.json (container volume), else the repo's explainer.config.json.
+export const CONFIG_PATH = process.env.EXPLAINER_CONFIG
+  ?? (existsSync(path.join(DATA_DIR, 'config.json')) ? path.join(DATA_DIR, 'config.json') : path.join(ROOT, 'explainer.config.json'));
 
 export function loadConfig(): Config {
   let user: Partial<Config> = {};
@@ -69,6 +104,9 @@ export function loadConfig(): Config {
   const cfg: Config = {
     llm: { ...DEFAULTS.llm, ...user.llm },
     agent: { ...DEFAULTS.agent, ...user.agent },
+    factCheck: { ...DEFAULTS.factCheck, ...user.factCheck },
+    server: { ...DEFAULTS.server, ...user.server },
+    notifications: { ...DEFAULTS.notifications, ...user.notifications, ntfy: { ...DEFAULTS.notifications.ntfy, ...user.notifications?.ntfy } },
     output: { ...DEFAULTS.output, ...user.output },
     research: {
       ...DEFAULTS.research,
@@ -76,12 +114,16 @@ export function loadConfig(): Config {
       searxng: { ...DEFAULTS.research.searxng, ...r.searxng },
       tavily: { ...DEFAULTS.research.tavily, ...r.tavily },
       jina: { ...DEFAULTS.research.jina, ...r.jina },
+      searchLimits: { ...DEFAULTS.research.searchLimits, ...r.searchLimits },
       fetch: { ...DEFAULTS.research.fetch, ...r.fetch },
     },
   };
   const providers = Array.isArray(cfg.research.provider) ? cfg.research.provider : [cfg.research.provider];
   if (!providers.every((p) => ['searxng', 'tavily', 'none'].includes(p))) {
     throw new Error(`research.provider must be "searxng", "tavily", "none" or a list like ["searxng", "tavily"] (got ${JSON.stringify(cfg.research.provider)})`);
+  }
+  if (!['overview', 'standard', 'deep', 'comprehensive'].includes(cfg.agent.defaultDepth)) {
+    throw new Error(`agent.defaultDepth must be overview, standard, deep or comprehensive (got "${cfg.agent.defaultDepth}")`);
   }
   if (!['none', 'tavily', 'jina'].includes(cfg.research.fetch.fallback)) {
     throw new Error(`research.fetch.fallback must be "none", "tavily" or "jina" (got "${cfg.research.fetch.fallback}")`);
@@ -95,5 +137,10 @@ export function loadConfig(): Config {
     cfg.research.provider = (v.length > 1 ? v : v[0]) as any;
   }
   if (process.env.SEARXNG_URL) cfg.research.searxng.url = process.env.SEARXNG_URL;
+  if (process.env.PORT) cfg.server.port = Number(process.env.PORT);
+  if (process.env.PUBLIC_URL) cfg.server.publicUrl = process.env.PUBLIC_URL;
+  if (process.env.NTFY_URL) cfg.notifications.ntfy.url = process.env.NTFY_URL;
+  if (process.env.NTFY_TOPIC) cfg.notifications.ntfy.topic = process.env.NTFY_TOPIC;
+  if (process.env.NTFY_TOKEN) cfg.notifications.ntfy.token = process.env.NTFY_TOKEN;
   return cfg;
 }
