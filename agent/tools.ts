@@ -5,9 +5,10 @@ import { build } from '../scripts/build.ts';
 import { check, formatReport } from '../scripts/check.ts';
 import { paths } from '../scripts/lib/paths.ts';
 import type { Tool } from './llm.ts';
+import { citedUrls, Research, RESEARCH_TOOL_NAMES } from './research/index.ts';
 import * as ui from './ui.ts';
 
-export const TOOLS: Tool[] = [
+const AUTHOR_TOOLS: Tool[] = [
   {
     type: 'function',
     function: {
@@ -69,17 +70,29 @@ export const TOOLS: Tool[] = [
 export class Workspace {
   slug: string;
   model: string;
+  research: Research;
   passed = false;
   finished = false;
   summary = '';
   private p: ReturnType<typeof paths>;
 
-  constructor(slug: string, model: string) {
+  constructor(slug: string, model: string, research: Research) {
     this.slug = slug;
     this.model = model;
+    this.research = research;
     this.p = paths(slug);
     mkdirSync(this.p.dir, { recursive: true });
+    research.attachLedger(this.p.sources);
   }
+
+  /** Tools offered in the current state: reading/editing only once a file exists. Research tools first. */
+  get tools(): Tool[] {
+    const authoring = AUTHOR_TOOLS.filter((t) => this.exists || !['read_explainer', 'edit_explainer'].includes(t.function.name));
+    return [...this.research.tools(), ...authoring];
+  }
+
+  /** Only the write tool: used to push a stuck model into writing. */
+  get writeOnlyTools(): Tool[] { return AUTHOR_TOOLS.filter((t) => t.function.name === 'write_explainer'); }
 
   get exists() { return existsSync(this.p.mdx); }
   get htmlPath() { return this.p.html; }
@@ -93,12 +106,13 @@ export class Workspace {
     } catch (err: any) {
       return `ERROR: could not parse the tool arguments as JSON (${err.message}). If the content is very long, make sure quotes, backslashes and newlines are escaped correctly in the JSON string.`;
     }
+    if (RESEARCH_TOOL_NAMES.has(name)) return this.research.run(name, args);
     switch (name) {
       case 'write_explainer': return this.write(args.content);
       case 'edit_explainer': return this.edit(args.edits);
       case 'read_explainer': return this.readNumbered(args.from_line, args.to_line);
       case 'finish': return this.finish(args.summary);
-      default: return `ERROR: unknown tool "${name}". Available: ${TOOLS.map((t) => t.function.name).join(', ')}`;
+      default: return `ERROR: unknown tool "${name}". Available: ${this.tools.map((t) => t.function.name).join(', ')}`;
     }
   }
 
@@ -112,7 +126,7 @@ export class Workspace {
   }
 
   async edit(edits: unknown): Promise<string> {
-    if (!this.exists) return 'ERROR: there is no file yet — use write_explainer first.';
+    if (!this.exists) return 'ERROR: there is no file yet. Your next call must be write_explainer with the complete MDX.';
     if (!Array.isArray(edits) || edits.length === 0) return 'ERROR: `edits` must be a non-empty array of { find, replace }.';
     let text = this.read();
     for (const [i, e] of edits.entries()) {
@@ -131,7 +145,7 @@ export class Workspace {
   }
 
   readNumbered(from?: number, to?: number): string {
-    if (!this.exists) return 'ERROR: there is no file yet — use write_explainer first.';
+    if (!this.exists) return 'ERROR: there is no file yet, so there is nothing to read. Your next call must be write_explainer with the complete MDX.';
     const lines = this.read().split('\n');
     const a = Math.max(1, from ?? 1);
     const b = Math.min(lines.length, to ?? lines.length);
@@ -157,6 +171,27 @@ export class Workspace {
     ui.status(ui.dim('  checking render in headless browser…'));
     const r = await check(this.slug);
     ui.clearStatus();
+
+    // Citations: every URL in the text must have come up during research (prevents invented URLs).
+    const mdx = this.read();
+    const unknown = citedUrls(mdx).filter((u) => !this.research.isKnown(u));
+    if (unknown.length) {
+      r.ok = false;
+      r.issues.push(`These URLs never appeared in your research results (possibly invented or mistyped). Remove them, or find and fetch the real source and cite the exact URL:\n${unknown.map((u) => `      ${u}`).join('\n')}`);
+    }
+    const body = mdx.replace(/```[\s\S]*?```/g, '');
+    const defs = new Set([...body.matchAll(/^\[\^([^\]]+)\]:/gm)].map((m) => m[1]));
+    const refs = new Set([...body.matchAll(/\[\^([^\]]+)\](?!:)/g)].map((m) => m[1]));
+    const undefinedRefs = [...refs].filter((x) => !defs.has(x));
+    const unusedDefs = [...defs].filter((x) => !refs.has(x));
+    if (undefinedRefs.length) { r.ok = false; r.issues.push(`Footnote markers without a definition (they render as raw text): ${undefinedRefs.map((x) => `[^${x}]`).join(', ')}`); }
+    if (unusedDefs.length) r.warnings.push(`Footnote definitions never referenced in the text (they are dropped): ${unusedDefs.map((x) => `[^${x}]`).join(', ')}`);
+    const footnotes = defs.size;
+    r.stats.citations = footnotes;
+    if (this.research.enabled && footnotes === 0) {
+      r.ok = false;
+      r.issues.push('No sources cited. Add footnote citations ([^label] after the claim, definitions at the end of the file) for the key facts and figures, using URLs from your research.');
+    }
     this.passed = r.ok;
     ui.line(r.ok ? ui.green(`  ✓ build + render check passed`) + ui.dim(` (${r.warnings.length} warning(s))`) : ui.red(`  ✗ render check: ${r.issues.length} issue(s)`));
     return `BUILD OK.\n${formatReport(r)}\n\n${r.ok ? (r.warnings.length ? 'Consider the warnings; fix them if reasonable, then call finish.' : 'Everything passed. Call finish (or improve the content first if needed).') : 'Fix every issue, then the file will be checked again.'}`;

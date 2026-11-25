@@ -20,6 +20,9 @@ export function registerEchartsTheme(): string {
     timeAxis: axis,
     tooltip: { backgroundColor: cssColor('var(--color-base-100)'), borderColor: faint, textStyle: { color: text } },
     line: { symbolSize: 6, smooth: false, lineStyle: { width: 2.5 } },
+    pie: { label: { color: text, textBorderWidth: 0 }, itemStyle: { borderColor: cssColor('var(--color-base-100)'), borderWidth: 2 } },
+    funnel: { label: { textBorderWidth: 0 } },
+    treemap: { label: { textBorderWidth: 0 } },
   });
   return name;
 }

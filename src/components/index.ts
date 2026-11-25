@@ -1,5 +1,5 @@
 // Every component exported here is available in explainer MDX files without an import.
-// When adding a component: export it here, document it in AGENTS.md, and use it in explainers/showcase.
+// When adding a component: export it here, document it in agent/prompts/authoring-guide.md, and use it in explainers/showcase.
 import Callout from './Callout.astro';
 import Chart from './Chart.astro';
 import Column from './Column.astro';

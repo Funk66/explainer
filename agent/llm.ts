@@ -23,12 +23,12 @@ export function createClient(cfg: Config) {
   });
 }
 
-export async function complete(client: OpenAI, cfg: Config, messages: Message[], tools: Tool[]): Promise<Completion> {
+export async function complete(client: OpenAI, cfg: Config, messages: Message[], tools: Tool[], toolChoice: 'auto' | 'required' = 'auto'): Promise<Completion> {
   const body: Record<string, unknown> = {
     model: cfg.llm.model,
     messages,
     tools,
-    tool_choice: 'auto',
+    tool_choice: toolChoice,
     stream: true,
     stream_options: { include_usage: true },
   };

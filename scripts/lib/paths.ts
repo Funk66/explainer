@@ -13,6 +13,7 @@ export const paths = (slug: string) => {
     html: path.join(dir, `${slug}.html`),
     checkDir: path.join(dir, '.check'),
     log: path.join(dir, 'agent-log.jsonl'),
+    sources: path.join(dir, 'sources.json'),
     buildDir: path.join(ROOT, '.build', slug),
   };
 };

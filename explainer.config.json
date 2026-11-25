@@ -10,10 +10,56 @@
     "extraBody": {}
   },
   "agent": {
-    "maxSteps": 20,
+    "maxSteps": 60,
     "showReasoning": true
   },
   "output": {
     "openInBrowser": true
+  },
+  "research": {
+    "provider": "tavily",
+    "wikipedia": true,
+    "wikipediaLanguage": "en",
+    "searxng": {
+      "url": "http://localhost:8080",
+      "engines": null,
+      "categories": null,
+      "language": "en"
+    },
+    "tavily": {
+      "apiKey": null,
+      "searchDepth": "basic"
+    },
+    "jina": {
+      "apiKey": null
+    },
+    "maxResults": 8,
+    "preferredDomains": [
+      "wikipedia.org",
+      "britannica.com",
+      "developer.mozilla.org",
+      "rfc-editor.org",
+      "ietf.org",
+      "w3.org",
+      "whatwg.org",
+      "iso.org",
+      "nist.gov",
+      "arxiv.org",
+      "nature.com",
+      "acm.org",
+      "ieee.org",
+      "docs.python.org",
+      "learn.microsoft.com",
+      "kernel.org"
+    ],
+    "blockedDomains": [
+      "pinterest.com",
+      "quora.com"
+    ],
+    "fetch": {
+      "maxChars": 8000,
+      "timeoutSeconds": 20,
+      "fallback": "jina"
+    }
   }
 }

@@ -154,3 +154,15 @@ body { @apply bg-base-100 text-base-content font-sans antialiased; text-renderin
 
 /* Component error box (shown when a diagram/chart fails to render) */
 .component-error { @apply rounded-box border border-error/50 bg-error/10 text-error p-3 font-mono text-xs whitespace-pre-wrap; }
+
+/* Sources (GFM footnotes) */
+.prose .footnotes { margin-top: 4rem; font-size: 0.9rem; color: color-mix(in oklab, var(--color-base-content) 75%, transparent); }
+.prose .footnotes .footnotes-label { font-size: 1.35rem; margin-top: 0; }
+.prose .footnotes ol { padding-left: 1.25rem; }
+.prose .footnotes li { margin: 0.4rem 0; overflow-wrap: anywhere; }
+.prose .footnotes li p { margin: 0; display: inline; }
+.prose .footnotes a { overflow-wrap: anywhere; }
+.prose .footnotes .data-footnote-backref { text-decoration: none; margin-left: 0.25rem; }
+.prose sup a[data-footnote-ref] { text-decoration: none; font-weight: 600; padding: 0 0.1em; }
+.prose sup a[data-footnote-ref]::before { content: '['; }
+.prose sup a[data-footnote-ref]::after { content: ']'; }

@@ -26,6 +26,13 @@ export default defineConfig({
     processor: unified({
       remarkPlugins: [remarkMath, remarkMermaid],
       rehypePlugins: [[rehypeKatex, { strict: false, throwOnError: false }], rehypeTableWrap],
+      // Footnotes ([^1]) are how explainers cite sources.
+      remarkRehype: {
+        footnoteLabel: 'Sources',
+        footnoteLabelTagName: 'h2',
+        footnoteLabelProperties: { className: ['footnotes-label'] },
+        footnoteBackLabel: 'Back to text',
+      },
     }),
     shikiConfig: {
       themes: { light: 'github-light', dark: 'github-dark' },
