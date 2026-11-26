@@ -2,7 +2,9 @@
 // outline and written section by section, so no single model call has to hold the whole document.
 import type { Depth } from '../scripts/lib/meta.ts';
 
-export type { Depth } from '../scripts/lib/meta.ts';
+export type { Depth, Rigor } from '../scripts/lib/meta.ts';
+
+export const RIGOR_NAMES = ['quick', 'thorough'] as const;
 
 export interface DepthSpec {
   label: string;

@@ -86,6 +86,8 @@ export class Workspace {
   /** Stats of the last successful render check (words, visuals, citations, …). */
   lastStats: Record<string, number> = {};
   verifyOptions: VerifyOptions = { requireCitations: true };
+  /** Finish automatically as soon as a check passes (saves the model a turn; used by quick writers). */
+  autoFinish = false;
 
   constructor(p: ExplainerPaths, model: string, research: Research, emit: Emit) {
     this.p = p;
@@ -211,6 +213,10 @@ export class Workspace {
     this.passed = r.ok;
     if (r.ok) this.lastStats = r.stats;
     this.emit({ type: 'build', ok: r.ok, issues: r.issues.length, warnings: r.warnings.length, detail: r.ok ? undefined : `render check: ${r.issues.length} issue(s)` });
+    if (r.ok && this.autoFinish) {
+      this.finished = true;
+      return `BUILD OK.\n${formatReport(r)}\n\nThe check passed — the explainer is complete.`;
+    }
     return `BUILD OK.\n${formatReport(r)}\n\n${r.ok ? (r.warnings.length ? 'Consider the warnings; fix them if reasonable, then call finish.' : 'Everything passed. Call finish (or improve the content first if needed).') : 'Fix every issue, then the file will be checked again.'}`;
   }
 }

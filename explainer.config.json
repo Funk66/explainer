@@ -64,10 +64,7 @@
       "learn.microsoft.com",
       "kernel.org"
     ],
-    "blockedDomains": [
-      "pinterest.com",
-      "quora.com"
-    ],
+    "blockedDomains": ["pinterest.com", "quora.com"],
     "fetch": {
       "maxChars": 8000,
       "timeoutSeconds": 20,

@@ -1,8 +1,8 @@
 # explainer
 
-**Turn a one-line question into a researched, fact-checked, interactive explainer page, written by an LLM you run yourself.**
+**Turn a one-line question into a reviewed, interactive explainer page, written by an LLM you run yourself.**
 
-Type _"Explain how DNS resolution works"_ into the web app (or the terminal), pick how deep you want to go (a 5-minute overview up to an hour-long deep dive), and some time later you have a polished page: long-form text with diagrams, charts, formulas, interactive plots with sliders, quizzes and flashcards, with its facts checked against web sources and cited. Every explainer is also a **single self-contained HTML file** that works offline and can be downloaded or shared.
+Type _"Explain how DNS resolution works"_ into the web app (or the terminal), pick how deep you want to go (a 5-minute overview up to an hour-long deep dive), and a few model turns later you have a polished page: long-form text with diagrams, charts, formulas, interactive plots with sliders, quizzes and flashcards. When accuracy matters more than time, choose **thorough** rigor and the facts are researched first and checked claim by claim against web sources. Every explainer is also a **single self-contained HTML file** that works offline and can be downloaded or shared.
 
 |                                                                          |                                                                                   |
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
@@ -13,9 +13,10 @@ Type _"Explain how DNS resolution works"_ into the web app (or the terminal), pi
 
 Chat answers are short, scroll away, and you can't check them. A good explainer is structured, visual, interactive and verifiable, but it takes hours to make. This project gives LLM agents a **content-only job** (Markdown plus a catalogue of tested components) and **feedback loops**:
 
-- research the facts before writing;
+- write from what the model knows, looking up only what it can't write confidently;
 - build the page and check it in a real browser, then fix what's broken;
-- have an independent fact-checker verify the claims, then fix those too.
+- have a fresh reviewer read the draft once and fix the mistakes it finds;
+- on demand (**thorough** rigor), research every specific fact first and fact-check claim by claim.
 
 The model never writes HTML or CSS, so every page looks consistent. A broken diagram, invented URL or unsupported claim is caught before you see it.
 
@@ -31,9 +32,10 @@ It's designed for **local models** (LM Studio, Ollama, llama.cpp, vLLM, or any O
   It works on phones too.
 
 - **Job queue**: exactly one job runs at a time, however many tabs or batches you submit. Jobs survive restarts, failures are retried with growing delays, and one failure never stops the rest of a batch.
+- **Rigor**: _quick_ (default) writes from the model's knowledge, with background reading from Wikipedia fetched up front and at most a few lookups, then one review pass. A standard explainer takes about 3–5 model turns, comparable to a few chat prompts. _Thorough_ researches first and fact-checks claim by claim, which takes many times longer. You can also run a thorough fact-check later on an explainer that was written quickly.
 - **Depth control**: _Overview_ (~5 min), _Standard_ (~15 min), _Deep dive_ (~30 min), _Comprehensive_ (~60 min). Long explainers are researched and outlined first, then written section by section. Each section writer sees the outline, a shared glossary and summaries of earlier sections, so the length isn't limited by the model's context window.
 - **Research**: web search (SearXNG and/or Tavily), Wikipedia, and reading web pages and PDFs. The agent only reads the passages relevant to the fact it's checking. Every cited URL must have come up during research.
-- **Fact-checking**: a fresh agent verifies the important claims and citations against sources; a fixer agent corrects what's wrong. The report is kept with the explainer.
+- **Review and fact-checking**: a fresh agent reviews the draft (quick) or verifies the important claims and citations against sources (thorough); a fixer agent corrects what's wrong. The report is kept with the explainer.
 - **Notifications** via [ntfy](https://ntfy.sh) when explainers are ready, need attention, or a batch finishes.
 - **Rebuild**: change the design or components, then re-render every explainer from its source. No LLM is needed.
 - **Guard rails** against accidental damage: generated MDX may only contain literal values (no code runs at build time), and pages served by the app are sandboxed.
@@ -56,10 +58,10 @@ flowchart LR
   W & S <-->|search · Wikipedia · read pages| Web[(Web)]
   W & S --> B[Build one HTML file + check in headless browser]
   B -->|errors, warnings| W & S
-  B --> F[Fact-checker] --> X[Fixer] --> D[Library]
+  B --> F[Reviewer / fact-checker] --> X[Fixer] --> D[Library]
 ```
 
-1. **Plan and research.** The agent lists the specific facts it needs (numbers, dates, names, how real systems work), searches for them and reads the most authoritative pages. For long explainers, an outline agent first designs the sections, glossary and visuals, and gathers sources for each section.
+1. **Plan (and research).** With _quick_ rigor, the agent gets the most relevant passages of the top Wikipedia articles for the topic (fetched without spending model turns) and writes from its own knowledge, with at most a few lookups for things it isn't sure of. With _thorough_ rigor, it first lists the specific facts it needs (numbers, dates, names, how real systems work), searches for them and reads the most authoritative pages. For long explainers, an outline agent first designs the sections, glossary and visuals.
 2. **Write.** The explainer is written as MDX (Markdown plus components), with sources cited as footnotes. Long explainers are written one section at a time.
 3. **Build and check.** After every write, [Astro](https://astro.build) renders the page with the component library ([Tailwind CSS](https://tailwindcss.com) + [daisyUI](https://daisyui.com), Mermaid, ECharts, KaTeX) and packs it into one HTML file. [Playwright](https://playwright.dev) then opens it at desktop and phone sizes and in dark mode and looks for:
    - JavaScript errors;
@@ -72,7 +74,7 @@ flowchart LR
 
    The agent fixes everything it reports.
 
-4. **Fact-check and fix.** A separate agent with a fresh context checks the claims and citations (section by section for long explainers). A fixer agent applies the corrections, and the result is checked again.
+4. **Review and fix.** A separate agent with a fresh context reads the draft. With _quick_ rigor it reads the whole document once and reports only real errors. With _thorough_ rigor it verifies claims and citations against sources, section by section for long explainers. A fixer agent applies the corrections, and the result is checked again.
 
 ## Quick start
 
@@ -138,16 +140,16 @@ Explainer pages are served at `/e/<slug>/`.
 ### Command line
 
 ```bash
-npm run explain -- "<prompt>" [--depth overview|standard|deep|comprehensive] [--no-fact-check]
+npm run explain -- "<prompt>" [--depth overview|standard|deep|comprehensive] [--thorough] [--no-fact-check]
 npm run explain -- --revise <slug> "<what to change>"
-npm run explain -- --fact-check <slug>         # fact-check (and fix) an existing explainer
+npm run explain -- --fact-check <slug>         # thorough fact-check (and fix) of an existing explainer
 npm run rebuild -- --all                       # re-render every explainer from its MDX (no LLM)
 npm run rebuild -- <slug>
 npm run build -- <slug> --open                 # rebuild one page after editing index.mdx by hand
 npm run check -- <slug>                        # render-check one page
 ```
 
-More `explain` options: `--slug <name>`, `--model <id>`, `--effort none|low|medium|high`, `--max-steps <n>`, `--no-open`. Press Ctrl-C to cancel. A deep or comprehensive run can be resumed by running it again with the same `--slug` and prompt; finished sections are kept.
+More `explain` options: `--rigor quick|thorough` (`--thorough` is short for the latter), `--slug <name>`, `--model <id>`, `--effort none|low|medium|high`, `--max-steps <n>`, `--no-open`. Press Ctrl-C to cancel. A deep or comprehensive run can be resumed by running it again with the same `--slug` and prompt; finished sections are kept.
 
 ### Writing by hand or with another coding agent
 
@@ -162,7 +164,7 @@ The content rules and component reference are in [`agent/prompts/authoring-guide
 | `deep`          | ~30 min | 5,000–7,500   | outline + 8–12 sections, each by a fresh agent   |
 | `comprehensive` | ~60 min | 10,000–14,000 | outline + 12–18 sections, each by a fresh agent  |
 
-Writing time depends on your model and hardware. With a ~30B model on a laptop, a standard explainer takes roughly 15–30 minutes including research and fact-check; a comprehensive one can take several hours. That's what batches running overnight are for.
+Writing time depends on your model and hardware. With _quick_ rigor, an overview or standard explainer takes about 3–5 model turns: write, fix build issues if needed, review, fix. A deep or comprehensive one takes about one turn per section plus a few more. _Thorough_ rigor can take hours with a local model; that's what batches running overnight are for.
 
 ## Configuration
 
@@ -190,9 +192,18 @@ Environment variables override the file. The real file is plain JSON; the commen
     "maxSteps": 60, // max model turns per agent (writer, each section, …)
     "showReasoning": true, // CLI: stream the model's thinking (dimmed)
     "defaultDepth": "standard",
+    "defaultRigor": "quick", // "quick" | "thorough"
+  },
+  "quick": {
+    // limits for quick-rigor runs (thorough runs use agent.maxSteps, factCheck.maxSteps and research.searchLimits)
+    "maxSteps": 10, // max model turns per agent (writer, section, reviewer, fixer)
+    "researchCalls": 3, // lookups of any kind per agent; 0 = write purely from knowledge
+    "webSearches": 2, // paid web searches per agent, within researchCalls
+    "reference": true, // give the writer passages from the top Wikipedia articles up front (no model turns)
+    "reasoningEffort": null, // e.g. "low" to reduce deliberation in quick runs; null = llm.reasoningEffort
   },
   "factCheck": {
-    "enabled": true,
+    "enabled": true, // review (quick) or fact-check (thorough) after writing
     "model": null, // a different model gives a more independent check; null = same model
     "maxSteps": 40,
   },
@@ -266,6 +277,8 @@ Environment variables override the file. The real file is plain JSON; the commen
 - **Both:** `["searxng", "tavily"]` uses SearXNG and falls back to Tavily when it errors or finds nothing.
 
 **Reading pages.** Pages are fetched directly and reduced to their readable text locally (encyclopedias, documentation, standards, university pages, PDFs). Only when a direct fetch fails (JavaScript-only sites, bot protection) is the fallback used: [Jina Reader](https://jina.ai/reader) works without a key at low request rates, and Tavily Extract reuses your Tavily key.
+
+**Quick vs thorough.** Quick runs use the research tools sparingly: background reading from Wikipedia is fetched up front, and each agent may make only `quick.researchCalls` lookups, after which the tools are withdrawn. Citations are optional. All of the above applies in full to thorough runs.
 
 **Cost control.** Paid web searches are capped per explainer by depth (`research.searchLimits`, covering writing and fact-check together), and each agent has a small budget of its own. Repeated or near-identical searches, Wikipedia searches and anything already in the persistent search cache (`data/search-cache.json`, 30 days) are free. An agent that keeps repeating searches loses search access for the rest of its task. With the defaults, a deep explainer uses at most 50 Tavily credits.
 

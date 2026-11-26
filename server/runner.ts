@@ -85,13 +85,13 @@ export class JobRunner extends EventEmitter {
       let result: PipelineResult | { ok: boolean; summary: string; failed?: number };
       switch (job.type) {
         case 'generate':
-          result = await generate({ prompt: job.params.prompt, slug: job.slug, depth: job.params.depth, factCheck: job.params.factCheck }, rc);
+          result = await generate({ prompt: job.params.prompt, slug: job.slug, depth: job.params.depth, rigor: job.params.rigor, factCheck: job.params.factCheck }, rc);
           break;
         case 'revise':
-          result = await revise(job.slug, job.params.instruction, rc, { factCheck: job.params.factCheck ?? false });
+          result = await revise(job.slug, job.params.instruction, rc, { factCheck: job.params.factCheck ?? false, rigor: job.params.rigor });
           break;
         case 'recheck':
-          result = await recheck(job.slug, rc);
+          result = await recheck(job.slug, rc, { rigor: job.params.rigor });
           break;
         case 'rebuild': {
           const targets = job.slug === '*' ? allExplainers() : [paths(job.slug)];

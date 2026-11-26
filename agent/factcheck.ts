@@ -1,6 +1,9 @@
-// Fact-check pass: fresh-context agents verify the claims of a finished explainer against sources
-// (one agent per range: the whole document, or each section of a long one), then a fixer agent
-// applies corrections. The report is saved as factcheck.json.
+// Checking a finished explainer, then fixing what was found. The report is saved as factcheck.json.
+//   review()     quick rigor: one reviewer reads the document once and reports only real errors
+//                (no tools beyond a tiny research budget, no per-claim bookkeeping).
+//   factCheck()  thorough rigor: fresh-context agents verify claims against sources, one agent per range
+//                (the whole document, or groups of sections of a long one).
+//   fixFindings() a fixer agent applies the corrections.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT } from '../scripts/lib/paths.ts';
@@ -27,6 +30,8 @@ export interface Finding {
 export interface FactCheckReport {
   checkedAt: string;
   model: string;
+  /** "review" (quick, single pass) or "fact-check" (claim by claim). Older reports have no mode. */
+  mode?: 'review' | 'fact-check';
   claimsChecked: number;
   summaries: string[];
   findings: Finding[];
@@ -74,7 +79,7 @@ const FACTCHECK_TOOLS: Tool[] = [
 
 /** Verify the claims in each range; returns all findings. */
 export async function factCheck(ctx: AgentContext, ws: Workspace, opts: { ranges: CheckRange[]; claimsPerRange: number; model: string }): Promise<FactCheckReport> {
-  const report: FactCheckReport = { checkedAt: new Date().toISOString(), model: opts.model, claimsChecked: 0, summaries: [], findings: [], fixed: false };
+  const report: FactCheckReport = { checkedAt: new Date().toISOString(), model: opts.model, mode: 'fact-check', claimsChecked: 0, summaries: [], findings: [], fixed: false };
   const research = ws.research;
   const readTool = AUTHOR_TOOLS.find((t) => t.function.name === 'read_explainer')!;
   const minClaims = Math.min(4, opts.claimsPerRange);
@@ -144,8 +149,92 @@ export async function factCheck(ctx: AgentContext, ws: Workspace, opts: { ranges
   return report;
 }
 
+const REVIEW_VERDICTS = ['incorrect', 'misleading', 'outdated', 'misattributed'] as const;
+
+const REVIEW_TOOLS: Tool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'submit_review',
+      description: 'Submit the problems you found (an empty list if the part is fine). You are then done.',
+      parameters: {
+        type: 'object',
+        properties: {
+          problems: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                quote: { type: 'string', description: 'Exact text from the document (short but unique)' },
+                kind: { type: 'string', enum: [...REVIEW_VERDICTS] },
+                problem: { type: 'string', description: 'What is wrong (1–2 sentences)' },
+                correction: { type: 'string', description: 'The corrected statement' },
+              },
+              required: ['quote', 'kind', 'problem'],
+            },
+          },
+          summary: { type: 'string', description: 'One sentence on the overall accuracy' },
+        },
+        required: ['problems', 'summary'],
+      },
+    },
+  },
+];
+
+/** Quick rigor: one read-through per range that reports only real errors. */
+export async function review(ctx: AgentContext, ws: Workspace, opts: { ranges: CheckRange[]; model: string; maxSteps: number; researchCalls: number; webSearches: number }): Promise<FactCheckReport> {
+  const report: FactCheckReport = { checkedAt: new Date().toISOString(), model: opts.model, mode: 'review', claimsChecked: 0, summaries: [], findings: [], fixed: false };
+  const research = ws.research;
+  for (const [i, range] of opts.ranges.entries()) {
+    const lines = ws.read().split('\n');
+    const excerpt = lines.slice(range.from - 1, range.to).map((l, k) => `${String(range.from + k).padStart(4)} | ${l}`).join('\n');
+    const headings = opts.ranges.length > 1 ? lines.map((l, k) => (/^##+ /.test(l) ? `${k + 1}: ${l}` : null)).filter(Boolean).join('\n') : '';
+    let submitted = false;
+    research.beginRun(opts.webSearches, opts.researchCalls);
+    const tools = research.tools().filter((t) => t.function.name !== 'web_search' || opts.webSearches > 0);
+    const run = await runAgent(ctx, {
+      name: opts.ranges.length > 1 ? `review ${i + 1}/${opts.ranges.length}` : 'review',
+      system: prompt('review.md'),
+      user: `Review ${opts.ranges.length > 1 ? `this part of the explainer: **${range.label}** (lines ${range.from}–${range.to})` : 'this explainer'} and call submit_review.\n\n` +
+        (headings ? `Document outline (for context):\n${headings}\n\n` : '') +
+        `${excerpt}\n\n` +
+        (tools.length && opts.researchCalls > 0 ? `Research tools available for at most ${opts.researchCalls} call(s), only for a specific doubt: ${tools.map((t) => t.function.name).join(', ')}.` : 'No research tools: judge from your own knowledge.'),
+      maxSteps: opts.maxSteps,
+      researchSteps: Math.min(2, opts.researchCalls),
+      tools: () => [...research.tools(), ...REVIEW_TOOLS],
+      outputTools: () => REVIEW_TOOLS,
+      outputNudge: 'Call submit_review now with the problems you found (an empty list if none).',
+      hasOutput: () => submitted,
+      isDone: () => submitted,
+      nextHint: () => 'Call submit_review with your findings.',
+      describeCall: (name, a) => (name === 'submit_review' ? `(${Array.isArray(a?.problems) ? a.problems.length : 0} problem(s))` : ''),
+      runTool: async (name, raw) => {
+        let a: any;
+        try { a = JSON.parse(raw || '{}'); } catch (err: any) { return `ERROR: invalid JSON arguments (${err.message})`; }
+        if (RESEARCH_TOOL_NAMES.has(name)) return research.run(name, a);
+        if (name !== 'submit_review') return `ERROR: unknown tool ${name}`;
+        const problems = Array.isArray(a.problems) ? a.problems : [];
+        const bad = problems.findIndex((x: any) => !x?.quote || !x?.problem);
+        if (bad >= 0) return `ERROR: problem #${bad + 1} needs a quote and a description of the problem. Nothing was recorded; submit again.`;
+        for (const x of problems) {
+          const verdict: Verdict = REVIEW_VERDICTS.includes(x.kind) ? x.kind : 'incorrect';
+          report.findings.push({ quote: String(x.quote), verdict, explanation: String(x.problem), correction: x.correction ? String(x.correction) : undefined, range: range.label });
+        }
+        if (a.summary) report.summaries.push(opts.ranges.length > 1 ? `${range.label}: ${a.summary}` : String(a.summary));
+        submitted = true;
+        return 'OK — review recorded.';
+      },
+    });
+    if (!run.done) ctx.emit({ type: 'note', level: 'warn', text: `review of "${range.label}" ended without a result (${run.reason})` });
+  }
+  ctx.emit({ type: 'note', level: report.findings.length ? 'warn' : 'info', text: `review: ${report.findings.length} problem(s) found` });
+  return report;
+}
+
+export interface FixOptions { maxSteps: number; webSearches: number | null; researchCalls: number | null }
+
 /** Ask a fixer agent to resolve the findings (and any build/check issues). Returns true if it finished with a passing check. */
-export async function fixFindings(ctx: AgentContext, ws: Workspace, findings: Finding[], guide: string, extra = ''): Promise<boolean> {
+export async function fixFindings(ctx: AgentContext, ws: Workspace, findings: Finding[], guide: string, extra = '', opts?: FixOptions): Promise<boolean> {
   if (findings.length === 0 && !extra) return true;
   const fileLines = ws.read().split('\n');
   const context = (f: Finding) => {
@@ -159,12 +248,13 @@ export async function fixFindings(ctx: AgentContext, ws: Workspace, findings: Fi
   };
   const list = findings.map((f, i) => `${i + 1}. [${f.verdict}] "${f.quote}"\n   Problem: ${f.explanation}${f.correction ? `\n   Suggested correction: ${f.correction}` : ''}${f.sourceUrl ? `\n   Evidence: ${f.sourceUrl}` : ''}${context(f)}`).join('\n\n');
   ws.finished = false;
-  ws.research.beginRun(Math.max(8, findings.length * 3));
+  ws.research.beginRun(opts ? opts.webSearches : Math.max(8, findings.length * 3), opts?.researchCalls ?? null);
   const run = await runAgent(ctx, {
     name: 'fix',
     system: prompt('fixer.md').replace('{{AUTHORING_GUIDE}}', () => guide),
-    user: `${findings.length ? `The fact-checker reported these problems in explainers/${ws.slug}/index.mdx:\n\n${list}\n\n` : ''}${extra}\n\nFix them with edit_explainer (read the relevant lines first), make sure the check passes, then call finish.`,
-    maxSteps: ctx.cfg.factCheck.maxSteps,
+    user: `${findings.length ? `The ${opts ? 'reviewer' : 'fact-checker'} reported these problems in explainers/${ws.slug}/index.mdx:\n\n${list}\n\n` : ''}${extra}\n\n` +
+      (opts ? 'Fix them with edit_explainer — ideally all in one call, using the current text shown above — then call finish once the check passes. Trust the corrections unless you know they are wrong; no need to research well-known facts.' : 'Fix them with edit_explainer (read the relevant lines first), make sure the check passes, then call finish.'),
+    maxSteps: opts?.maxSteps ?? ctx.cfg.factCheck.maxSteps,
     researchBudget: 1,
     tools: () => ws.tools.filter((t) => t.function.name !== 'write_explainer'),
     outputTools: () => ws.tools,

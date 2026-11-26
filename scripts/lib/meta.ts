@@ -4,6 +4,8 @@ import { parse as parseYaml } from 'yaml';
 import type { ExplainerPaths } from './paths.ts';
 
 export type Depth = 'overview' | 'standard' | 'deep' | 'comprehensive';
+/** How much verification goes into an explainer: quick (write from knowledge + one review pass) or thorough (research-first + claim-by-claim fact-check). */
+export type Rigor = 'quick' | 'thorough';
 export type ExplainerStatus = 'draft' | 'ready' | 'needs-attention' | 'failed';
 
 export interface ExplainerMeta {
@@ -13,6 +15,7 @@ export interface ExplainerMeta {
   tags: string[];
   level?: string;
   depth?: Depth;
+  rigor?: Rigor;
   prompt?: string;
   model?: string;
   status: ExplainerStatus;
@@ -22,7 +25,8 @@ export interface ExplainerMeta {
   readingMinutes?: number;
   htmlBytes?: number;
   citations?: number;
-  factCheck?: { checkedAt: string; model: string; claimsChecked: number; problems: number; fixed: boolean };
+  /** mode "review" = quick single-pass review (claimsChecked is 0); "fact-check" = claim-by-claim verification. */
+  factCheck?: { checkedAt: string; model: string; mode?: 'review' | 'fact-check'; claimsChecked: number; problems: number; fixed: boolean };
   summary?: string;
   createdAt: string;
   updatedAt: string;

@@ -1,5 +1,5 @@
 // Command-line front end for the explainer pipeline.
-//   npm run explain -- "explain X and its applicability to Y" [--depth deep]
+//   npm run explain -- "explain X and its applicability to Y" [--depth deep] [--thorough]
 //   npm run explain -- --revise <slug> "make the intro shorter and add a chart about Z"
 //   npm run explain -- --fact-check <slug>
 import { spawn } from 'node:child_process';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { paths } from '../scripts/lib/paths.ts';
 import { CONFIG_PATH, loadConfig } from './config.ts';
-import { DEPTH_NAMES, DEPTHS, type Depth } from './depth.ts';
+import { DEPTH_NAMES, DEPTHS, type Depth, RIGOR_NAMES, type Rigor } from './depth.ts';
 import { AgentAborted } from './loop.ts';
 import { generate, recheck, revise, type PipelineResult } from './pipeline.ts';
 import { terminalRenderer } from './terminal.ts';
@@ -18,6 +18,8 @@ const { values: opts, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     depth: { type: 'string', short: 'd' },
+    rigor: { type: 'string' },
+    thorough: { type: 'boolean', default: false },
     slug: { type: 'string' },
     revise: { type: 'string' },
     'fact-check': { type: 'string' },
@@ -34,18 +36,22 @@ const request = positionals.join(' ').trim();
 const recheckSlug = opts['fact-check'];
 if (opts.help || (!request && !recheckSlug)) {
   console.log(`Usage:
-  npm run explain -- "explain X and its applicability to Y" [--depth <depth>]
+  npm run explain -- "explain X and its applicability to Y" [--depth <depth>] [--thorough]
   npm run explain -- --revise <slug> "what to change"
-  npm run explain -- --fact-check <slug>
+  npm run explain -- --fact-check <slug>     (thorough claim-by-claim check; --rigor quick for a single review)
 
 Depths:
 ${DEPTH_NAMES.map((d) => `  ${d.padEnd(14)} ~${DEPTHS[d].minutes} min read, ${DEPTHS[d].words[0]}–${DEPTHS[d].words[1]} words${DEPTHS[d].mode === 'sections' ? ' (outline + section by section)' : ''}`).join('\n')}
 
 Options:
   -d, --depth <depth>  How detailed (default: agent.defaultDepth in explainer.config.json)
+  --rigor <rigor>      quick: write from knowledge + one review pass (few model turns)
+                       thorough: research first + claim-by-claim fact-check (much slower)
+                       (default: agent.defaultRigor)
+  --thorough           Same as --rigor thorough
   --slug <slug>        Output folder name (default: derived from the prompt). Re-using the slug of an
                        interrupted deep/comprehensive run with the same prompt resumes it.
-  --no-fact-check      Skip the fact-check pass
+  --no-fact-check      Skip the review / fact-check pass
   --model <id>         Override llm.model
   --effort <level>     Override llm.reasoningEffort (none | low | medium | high)
   --max-steps <n>      Override agent.maxSteps (per agent)
@@ -60,6 +66,8 @@ if (opts['max-steps']) cfg.agent.maxSteps = Number(opts['max-steps']);
 if (opts['no-open']) cfg.output.openInBrowser = false;
 if (!cfg.llm.model) fail(`No model configured. Set "llm.model" in ${path.relative(process.cwd(), CONFIG_PATH)} or pass --model.`);
 if (opts.depth && !DEPTH_NAMES.includes(opts.depth as Depth)) fail(`--depth must be one of: ${DEPTH_NAMES.join(', ')}`);
+if (opts.rigor && !RIGOR_NAMES.includes(opts.rigor as Rigor)) fail(`--rigor must be one of: ${RIGOR_NAMES.join(', ')}`);
+const rigor = (opts.thorough ? 'thorough' : opts.rigor) as Rigor | undefined;
 
 const emit = terminalRenderer({ showReasoning: cfg.agent.showReasoning });
 const controller = new AbortController();
@@ -73,9 +81,9 @@ const started = Date.now();
 
 let result: PipelineResult;
 try {
-  if (recheckSlug) result = await recheck(recheckSlug, rc);
-  else if (opts.revise) result = await revise(opts.revise, request, rc, { factCheck: false });
-  else result = await generate({ prompt: request, slug: opts.slug, depth: opts.depth as Depth | undefined, factCheck: opts['no-fact-check'] ? false : undefined }, rc);
+  if (recheckSlug) result = await recheck(recheckSlug, rc, { rigor });
+  else if (opts.revise) result = await revise(opts.revise, request, rc, { factCheck: false, rigor });
+  else result = await generate({ prompt: request, slug: opts.slug, depth: opts.depth as Depth | undefined, rigor, factCheck: opts['no-fact-check'] ? false : undefined }, rc);
 } catch (err: any) {
   if (err instanceof AgentAborted) fail('Cancelled. A deep/comprehensive run can be resumed with the same --slug and prompt.');
   if (err?.name === 'IncompleteRun') fail(`${err.message}. To resume, run the same command again with --slug <slug shown above> and the same prompt and depth.`);

@@ -14,9 +14,9 @@ interface Job {
 interface Meta {
   slug: string; title: string; description: string; tags: string[]; level?: string; depth?: string; prompt?: string;
   model?: string; status: Status; statusDetail?: string; words?: number; readingMinutes?: number; citations?: number;
-  factCheck?: { claimsChecked: number; problems: number; fixed: boolean }; createdAt: string; updatedAt: string; job: Job | null;
+  rigor?: string; factCheck?: { mode?: string; claimsChecked: number; problems: number; fixed: boolean }; createdAt: string; updatedAt: string; job: Job | null;
 }
-interface AppConfig { model: string; research: string; factCheck: boolean; defaultDepth: string; depths: { id: string; label: string; minutes: number; words: [number, number]; mode: string }[]; notifications: boolean }
+interface AppConfig { model: string; research: string; factCheck: boolean; defaultDepth: string; defaultRigor: string; depths: { id: string; label: string; minutes: number; words: [number, number]; mode: string }[]; notifications: boolean }
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel)!;
 const view = $('#view');
@@ -178,7 +178,7 @@ function card(e: Meta) {
       ${busy ? `<div class="mb-3 rounded-lg bg-info/10 px-3 py-2 text-xs text-info"><span class="loading loading-dots loading-xs align-middle"></span> ${job!.status === 'queued' ? 'queued' : esc(job!.progress ?? 'running')}</div>` : ''}
       <div class="flex flex-wrap items-center gap-1.5">
         ${e.status !== 'ready' && !busy ? `<span class="badge badge-sm ${statusBadge[e.status]}" title="${esc(e.statusDetail ?? '')}">${esc(e.status.replace('-', ' '))}</span>` : ''}
-        ${e.factCheck?.claimsChecked ? `<span class="badge badge-sm badge-ghost" title="fact-check">✓ ${e.factCheck.claimsChecked} claims${e.factCheck.problems ? ` · ${e.factCheck.problems} fixed` : ''}</span>` : ''}
+        ${e.factCheck?.claimsChecked ? `<span class="badge badge-sm badge-ghost" title="fact-check">✓ ${e.factCheck.claimsChecked} claims${e.factCheck.problems ? ` · ${e.factCheck.problems} fixed` : ''}</span>` : e.factCheck?.mode === 'review' ? `<span class="badge badge-sm badge-ghost" title="reviewed once after writing">✓ reviewed${e.factCheck.problems ? ` · ${e.factCheck.problems} fixed` : ''}</span>` : ''}
         ${e.tags.slice(0, 3).map((t) => `<span class="badge badge-sm badge-outline border-base-content/15 text-base-content/60">${esc(t)}</span>`).join('')}
         <a href="#/x/${e.slug}" class="btn btn-ghost btn-xs relative z-10 ml-auto" title="Details and actions">
           <svg class="size-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
@@ -195,7 +195,7 @@ async function renderNew() {
   view.innerHTML = `
   <form id="new-form" class="mx-auto max-w-2xl">
     <h1 class="font-serif text-3xl font-semibold">New explainer</h1>
-    <p class="mt-1 text-sm text-base-content/60">Written by <code>${esc(c.model)}</code> · research: ${esc(c.research)}${c.factCheck ? ' · fact-checked' : ''}</p>
+    <p class="mt-1 text-sm text-base-content/60">Written by <code>${esc(c.model)}</code> · research: ${esc(c.research)}</p>
     <label class="mt-6 block">
       <span class="text-sm font-medium">What should be explained?</span>
       <textarea id="prompt" required rows="4" class="textarea mt-1 w-full text-base" placeholder="Explain how the internet works and why packets can take different routes"></textarea>
@@ -214,8 +214,18 @@ async function renderNew() {
         </label>`).join('')}
       </div>
     </fieldset>
+    <fieldset class="mt-6">
+      <legend class="text-sm font-medium">Rigor</legend>
+      <div class="mt-2 grid gap-2 sm:grid-cols-2">
+        ${[['quick', 'Quick', 'Written from the model’s knowledge with a few lookups, then reviewed once. A handful of model turns.'], ['thorough', 'Thorough', 'Researched first, then fact-checked claim by claim against sources. Many times slower.']].map(([id, label, text]) => `
+        <label class="flex cursor-pointer gap-3 rounded-box border border-base-300 p-3 has-checked:border-primary has-checked:bg-primary/5">
+          <input type="radio" name="rigor" value="${id}" class="radio radio-sm radio-primary mt-0.5" ${id === c.defaultRigor ? 'checked' : ''} />
+          <span><span class="font-semibold">${label}</span><span class="block text-xs text-base-content/55">${text}</span></span>
+        </label>`).join('')}
+      </div>
+    </fieldset>
     <label class="mt-5 flex items-center gap-2 text-sm">
-      <input id="factcheck" type="checkbox" class="toggle toggle-sm toggle-primary" ${c.factCheck ? 'checked' : ''} /> Fact-check after writing (verifies claims against sources and fixes problems)
+      <input id="factcheck" type="checkbox" class="toggle toggle-sm toggle-primary" ${c.factCheck ? 'checked' : ''} /> Check after writing (a review pass, or a full fact-check when thorough) and fix problems
     </label>
     <div class="mt-8 flex items-center gap-3">
       <button class="btn btn-primary" type="submit">Queue</button>
@@ -230,7 +240,8 @@ async function renderNew() {
     if (!prompts.length) return;
     const depth = $<HTMLInputElement>('input[name=depth]:checked').value;
     try {
-      const r = await api('/api/jobs', { method: 'POST', json: { prompts, depth, factCheck: $<HTMLInputElement>('#factcheck').checked } });
+      const rigor = $<HTMLInputElement>('input[name=rigor]:checked').value;
+      const r = await api('/api/jobs', { method: 'POST', json: { prompts, depth, rigor, factCheck: $<HTMLInputElement>('#factcheck').checked } });
       toast(`${r.jobs.length} explainer${r.jobs.length > 1 ? 's' : ''} queued`, 'success');
       location.hash = r.jobs.length === 1 ? `#/jobs/${r.jobs[0].id}` : '#/jobs';
     } catch (err: any) { toast(err.message, 'error'); }
@@ -254,7 +265,7 @@ async function renderJobs() {
 }
 
 function jobLabel(j: Job) {
-  return j.type === 'generate' ? (j.params.prompt as string) : j.type === 'revise' ? `Revise ${j.slug}: ${j.params.instruction}` : j.type === 'recheck' ? `Fact-check ${j.slug}` : j.slug === '*' ? 'Rebuild all explainers' : `Rebuild ${j.slug}`;
+  return j.type === 'generate' ? (j.params.prompt as string) : j.type === 'revise' ? `Revise ${j.slug}: ${j.params.instruction}` : j.type === 'recheck' ? `${j.params.rigor === 'quick' ? 'Review' : 'Fact-check'} ${j.slug}` : j.slug === '*' ? 'Rebuild all explainers' : `Rebuild ${j.slug}`;
 }
 
 function jobRow(j: Job) {
@@ -380,7 +391,7 @@ async function renderDetail(slug: string) {
         ${m.statusDetail && m.status !== 'ready' ? `<div class="alert alert-warning mt-6 text-sm">${esc(m.statusDetail)}</div>` : ''}
         ${m.prompt ? `<h2 class="mt-8 text-xs font-semibold uppercase tracking-widest text-base-content/50">Prompt</h2><p class="mt-1 text-sm">${esc(m.prompt)}</p>` : ''}
         ${fc ? `
-          <h2 class="mt-8 text-xs font-semibold uppercase tracking-widest text-base-content/50">Fact-check · ${fc.claimsChecked} claims · ${fc.findings.length} problem(s)${fc.findings.length ? (fc.fixed ? ' · fixed' : ' · <span class="text-warning">not fully resolved</span>') : ''}</h2>
+          <h2 class="mt-8 text-xs font-semibold uppercase tracking-widest text-base-content/50">${fc.mode === 'review' ? 'Review' : `Fact-check · ${fc.claimsChecked} claims`} · ${fc.findings.length} problem(s)${fc.findings.length ? (fc.fixed ? ' · fixed' : ' · <span class="text-warning">not fully resolved</span>') : ''}</h2>
           ${fc.summaries?.length ? `<ul class="mt-2 list-disc pl-5 text-sm text-base-content/70">${fc.summaries.map((s: string) => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
           ${fc.findings.length ? `<ul class="mt-3 space-y-2">${fc.findings.map((f: any) => `
             <li class="rounded-box border border-base-300 p-3 text-sm">
@@ -395,7 +406,7 @@ async function renderDetail(slug: string) {
       </div>
       <aside class="space-y-6">
         <dl class="grid grid-cols-2 gap-x-3 gap-y-2 rounded-box border border-base-300 p-4 text-sm">
-          ${[['Status', m.status.replace('-', ' ')], ['Depth', depthLabel(m.depth)], ['Level', m.level], ['Reading', m.readingMinutes ? `${m.readingMinutes} min` : ''], ['Words', m.words?.toLocaleString()], ['Citations', m.citations], ['Model', m.model], ['Created', m.createdAt ? new Date(m.createdAt).toLocaleString() : ''], ['Updated', timeAgo(m.updatedAt)]]
+          ${[['Status', m.status.replace('-', ' ')], ['Depth', depthLabel(m.depth)], ['Rigor', m.rigor], ['Level', m.level], ['Reading', m.readingMinutes ? `${m.readingMinutes} min` : ''], ['Words', m.words?.toLocaleString()], ['Citations', m.citations], ['Model', m.model], ['Created', m.createdAt ? new Date(m.createdAt).toLocaleString() : ''], ['Updated', timeAgo(m.updatedAt)]]
             .filter(([, v]) => v !== undefined && v !== '' && v !== null).map(([k, v]) => `<dt class="text-base-content/55">${k}</dt><dd class="truncate" title="${esc(v)}">${esc(v)}</dd>`).join('')}
         </dl>
         <form id="revise-form" class="space-y-2">
@@ -404,7 +415,7 @@ async function renderDetail(slug: string) {
           <button class="btn btn-sm w-full">Queue revision</button>
         </form>
         <div class="grid gap-2">
-          <button id="act-factcheck" class="btn btn-sm">Fact-check again</button>
+          <button id="act-factcheck" class="btn btn-sm" title="Verify claims one by one against sources and fix problems (slow)">Fact-check thoroughly</button>
           <button id="act-rebuild" class="btn btn-sm" title="Re-render the page from its MDX (after design updates)">Regenerate HTML</button>
           <button id="act-delete" class="btn btn-sm btn-outline btn-error">Delete</button>
         </div>

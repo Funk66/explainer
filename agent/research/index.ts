@@ -38,6 +38,9 @@ export class Research {
   /** Consecutive repeated searches; after a few, search tools are withdrawn for the rest of the run. */
   private repeatStreak = 0;
   private searchWithdrawn = false;
+  /** Per-agent budget of research calls of any kind (null = unlimited); once used up, no research tools are offered. */
+  private callBudget: number | null = null;
+  private calls = 0;
 
   constructor(cfg: ResearchConfig) {
     this.cfg = cfg;
@@ -58,10 +61,16 @@ export class Research {
     for (const [k, v] of Object.entries(this.cache)) if (Date.parse(v.at) < cutoff) delete this.cache[k];
   }
 
-  /** Start a new agent run with its own budget of paid web searches (repeats and Wikipedia are free). */
-  beginRun(searchBudget: number | null) {
+  /**
+   * Start a new agent run with its own budget of paid web searches (repeats and Wikipedia are free) and,
+   * optionally, a cap on research calls of any kind (searches + page reads). When the cap is reached the
+   * research tools are no longer offered, which is the reliable way to stop a model from researching.
+   */
+  beginRun(searchBudget: number | null, callBudget: number | null = null) {
     this.budget = searchBudget;
     this.used = 0;
+    this.callBudget = callBudget;
+    this.calls = 0;
     this.repeatStreak = 0;
     this.searchWithdrawn = false;
   }
@@ -81,8 +90,12 @@ export class Research {
   lookup(url: string) { return this.ledger.get(normalizeUrl(url)) ?? null; }
   get sources() { return [...this.ledger.values()]; }
 
+  /** Research calls left in this agent run (null = unlimited). */
+  get callsLeft() { return this.callBudget === null ? null : Math.max(0, this.callBudget - this.calls); }
+
   tools(): Tool[] {
     const t: Tool[] = [];
+    if (this.callsLeft === 0) return t;
     if (this.providers.length && !this.searchWithdrawn) t.push({
       type: 'function',
       function: {
@@ -119,6 +132,8 @@ export class Research {
   }
 
   async run(name: string, args: any): Promise<string> {
+    if (this.callsLeft === 0) return 'ERROR: the research budget for this task is used up. Continue with your task using what you know.';
+    this.calls++;
     try {
       if (name === 'web_search') return await this.webSearch(String(args.query ?? ''));
       if (name === 'search_wikipedia') return await this.wikipedia(String(args.query ?? ''));
@@ -128,6 +143,38 @@ export class Research {
       return `ERROR: ${err?.message ?? err}`;
     } finally {
       this.save();
+    }
+  }
+
+  /**
+   * Background reading for a request, fetched without any model turns: the most relevant passages of the
+   * top Wikipedia articles for the request's topic. The articles become citable sources. Returns '' when
+   * Wikipedia is disabled or nothing useful was found (never throws).
+   */
+  async reference(request: string, opts: { articles?: number; maxChars?: number } = {}): Promise<string> {
+    if (!this.cfg.wikipedia) return '';
+    const query = topicQuery(request);
+    if (!query) return '';
+    const articles = opts.articles ?? 2;
+    const maxChars = opts.maxChars ?? 7000;
+    try {
+      const timeout = this.cfg.fetch.timeoutSeconds * 1000;
+      const results = (await searchWikipedia(query, this.cfg.wikipediaLanguage, 5, timeout)).filter((r) => !/^List of /i.test(r.title)).slice(0, articles);
+      this.remember(results, `reference: ${query}`);
+      const parts: string[] = [];
+      for (const r of results) {
+        let page: FetchedPage;
+        try { page = this.pages.get(normalizeUrl(r.url)) ?? await fetchPage(r.url, timeout); } catch { continue; }
+        this.pages.set(normalizeUrl(r.url), page);
+        const { excerpt } = focusedExcerpts(page.text, query, Math.floor(maxChars / results.length));
+        if (!excerpt) continue;
+        this.ledger.set(normalizeUrl(r.url), { url: r.url, title: page.title, status: 'fetched', via: 'reference', at: new Date().toISOString() });
+        parts.push(`SOURCE: ${page.title}\nURL: ${r.url}\n${excerpt}`);
+      }
+      this.save();
+      return parts.join('\n\n---\n\n');
+    } catch {
+      return '';
     }
   }
 
@@ -296,6 +343,14 @@ export function citedUrls(mdx: string): string[] {
 
 function badProvider(name: string): never {
   throw new Error(`Unknown research.provider "${name}" (use "searxng", "tavily", "none" or a list such as ["searxng", "tavily"])`);
+}
+
+const TOPIC_STOP = new Set('a an the of to and or in on for with by is are was what how why when which who does do vs explain explained explanation explainer describe description tell me please write give overview introduction intro guide about its it this that their works work working using use detailed detail simple simply terms beginner beginners'.split(' '));
+
+/** The topic words of a request ("explain the Paxos consensus algorithm" → "paxos consensus algorithm"). */
+export function topicQuery(request: string): string {
+  const words = request.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+(?:[.+#-][a-z0-9]+)*/g) ?? [];
+  return words.filter((w) => !TOPIC_STOP.has(w)).slice(0, 8).join(' ');
 }
 
 const QUERY_STOP = new Set('a an the of to and or in on for with by is are was what how why when which does do vs explained explanation'.split(' '));

@@ -51,7 +51,7 @@ Three to five sentences that summarise the whole explainer.
 8. **Applicability.** If the prompt mentions a context ("…and its applicability to Y"), dedicate at least one full section to it, with concrete use cases, limitations and when *not* to use it (`<Columns>` works well for trade-offs).
 9. **Finish** with a "Key takeaways" section (short bullet list) and optionally "Going further" (names of papers, books, tools — no fabricated URLs).
 10. Length: follow the **target length** in your task (it depends on the requested depth, from a 5-minute overview to an hour-long deep dive). Accuracy beats length: never invent facts, numbers, citations or URLs. If a number is illustrative, say so.
-11. **Verify before you write.** Check specific facts (numbers, dates, names, standards, how real systems work) against authoritative sources — official docs, standards, Wikipedia, textbooks, primary papers — and cite them (see *Citations*). If you can't verify something, leave it out or mark it as approximate.
+11. **Accuracy.** How much to look up is set by the research policy in your task; follow it. Whatever the policy, don't present guesses as facts: if you are unsure of a specific figure, date or name and can't check it, leave it out, round it, or mark it as approximate.
 12. Tone: clear, warm, precise. Short paragraphs. Define every term on first use (`<Term>` or `<Definition>`).
 
 ## Citations
@@ -66,7 +66,7 @@ An MP3 frame holds 1152 samples per channel[^mp3-spec], split into two granules 
 ```
 
 - Format: `[^label]: "Page title" — Publisher/Site. URL`. Labels are short and unique; they are numbered automatically in order of appearance.
-- Cite specific numbers, dates, quotes, standards and non-obvious claims; common knowledge needs no citation.
+- Cite specific numbers, dates, quotes, standards and non-obvious claims when you have a source for them; common knowledge needs no citation. Whether citations are required depends on your task.
 - **Only cite URLs that you actually found during research**, copied exactly. Any other URL is rejected by the checker.
 - Each footnote definition must be used at least once in the text, and vice versa.
 - Ordinary links `[text](url)` are allowed but follow the same rule.
@@ -279,4 +279,4 @@ Tables (`| a | b |`), blockquotes (good for a memorable principle or quotation),
 - [ ] Starts with motivation + `tldr`; ends with key takeaways.
 - [ ] At least 2–3 visuals (diagram / chart / FunctionPlot) that genuinely aid understanding.
 - [ ] At least 2 quiz questions; every term defined.
-- [ ] Every specific fact, number and name was verified against a source and is cited with a footnote.
+- [ ] No guessed figures presented as facts; footnotes only point to URLs from research (and follow the research policy in your task).

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { stringify as toYaml } from 'yaml';
 import { ROOT } from '../scripts/lib/paths.ts';
-import { DEPTHS, type Depth } from './depth.ts';
+import { DEPTHS, type Depth, type Rigor } from './depth.ts';
 import type { Tool } from './llm.ts';
 import { type AgentContext, runAgent } from './loop.ts';
 import { RESEARCH_TOOL_NAMES } from './research/index.ts';
@@ -38,6 +38,18 @@ export interface Outline {
 }
 
 const prompt = (name: string) => readFileSync(path.join(ROOT, 'agent/prompts', name), 'utf8');
+
+/** Step 2 of the outline/section prompts, by rigor. */
+const POLICY = {
+  outline: {
+    thorough: 'Research the topic broadly so the structure is right and complete: overview articles, official documentation, standards, textbooks. Collect the most authoritative URLs for each section.',
+    quick: 'Plan from your own knowledge of the topic — there is no need to research what you already know. Use the background reading in the task if there is any (its URLs can go into `sources`); look something up only if the topic is recent or niche (small budget). Then save the outline right away.',
+  },
+  section: {
+    thorough: 'List the specific facts you need and **research them before writing** (cross-check important numbers; read the actual pages, using `focus`). Start with the sources listed for your section in the outline.',
+    quick: "Write from your own knowledge: well-established facts need no lookup and no cross-checking. Look up only what you can't write confidently (at most one or two lookups, usually none); if you are still unsure, leave the detail out or mark it as approximate. A reviewer reads the whole document afterwards.",
+  },
+};
 
 const OUTLINE_TOOL: Tool = {
   type: 'function',
@@ -90,20 +102,25 @@ const saveOutline = (file: string, o: Outline) => writeFileSync(file, JSON.strin
 const sectionFile = (ws: Workspace, i: number) => path.join(ws.p.sectionsDir, `${String(i + 1).padStart(2, '0')}.mdx`);
 
 /** Phase 1: research + outline. Returns the saved outline, or null if the agent failed. */
-export async function planOutline(ctx: AgentContext, ws: Workspace, request: string, depth: Depth): Promise<Outline | null> {
+export async function planOutline(ctx: AgentContext, ws: Workspace, request: string, depth: Depth, opts: { rigor: Rigor; background?: string }): Promise<Outline | null> {
   const spec = DEPTHS[depth];
+  const quick = opts.rigor === 'quick';
+  const q = ctx.cfg.quick;
   let saved: Outline | null = null;
   const research = ws.research;
-  research.beginRun(depth === 'comprehensive' ? 35 : 25);
+  if (quick) research.beginRun(q.webSearches, q.researchCalls);
+  else research.beginRun(depth === 'comprehensive' ? 35 : 25);
   const run = await runAgent(ctx, {
     name: 'outline',
-    system: prompt('outline.md'),
+    system: prompt('outline.md').replace('{{RESEARCH_POLICY}}', () => POLICY.outline[opts.rigor]),
     user: `Plan an explainer for this request:\n\n${request}\n\n` +
       `Depth: **${spec.label}** (about ${spec.minutes} minutes of reading). ${spec.brief}\n` +
       `Plan ${spec.sections[0]}–${spec.sections[1]} sections totalling ${spec.words[0].toLocaleString('en')}–${spec.words[1].toLocaleString('en')} words, with ${spec.visuals} visuals and ${spec.quizzes} quizzes spread across the sections.\n\n` +
-      `Today is ${new Date().toISOString().slice(0, 10)}. ${research.enabled ? `Research tools: ${research.tools().map((t) => t.function.name).join(', ')}.` : 'No research tools are available: plan from well-established knowledge.'}`,
-    maxSteps: ctx.cfg.agent.maxSteps,
+      (opts.background ? `${opts.background}\n\n` : '') +
+      `Today is ${new Date().toISOString().slice(0, 10)}. ${research.tools().length ? `Research tools${quick ? ` (at most ${q.researchCalls} call(s))` : ''}: ${research.tools().map((t) => t.function.name).join(', ')}.` : 'No research tools are available: plan from well-established knowledge.'}`,
+    maxSteps: quick ? q.maxSteps : ctx.cfg.agent.maxSteps,
     researchBudget: 0.6,
+    ...(quick && { researchSteps: Math.max(1, Math.min(q.researchCalls, 3)) }),
     tools: () => [...research.tools(), OUTLINE_TOOL],
     outputTools: () => [OUTLINE_TOOL],
     outputNudge: 'Stop researching and call save_outline with the complete outline now.',
@@ -187,9 +204,12 @@ function normalizeSection(content: string, outline: Outline, i: number): string 
 }
 
 /** Phase 2: write every pending section. Returns true if all sections were written with a passing check. */
-export async function writeSections(ctx: AgentContext, ws: Workspace, outline: Outline, guide: string): Promise<boolean> {
+export async function writeSections(ctx: AgentContext, ws: Workspace, outline: Outline, guide: string, rigor: Rigor): Promise<boolean> {
   mkdirSync(ws.p.sectionsDir, { recursive: true });
   const research = ws.research;
+  const quick = rigor === 'quick';
+  const q = ctx.cfg.quick;
+  const beginRun = (thoroughBudget: number) => (quick ? research.beginRun(q.webSearches, q.researchCalls) : research.beginRun(thoroughBudget));
   const n = outline.sections.length;
   ws.verifyOptions = { requireCitations: false };
 
@@ -199,7 +219,7 @@ export async function writeSections(ctx: AgentContext, ws: Workspace, outline: O
     ctx.emit({ type: 'phase', phase: 'section', label: `Section ${i + 1}/${n}: ${sec.heading}` });
     let finished = false;
     ws.passed = false; // a pass from the previous section must not count for this one
-    research.beginRun(12);
+    beginRun(12);
     let written = existsSync(sectionFile(ws, i));
     let range = assemble(ws, outline, written ? i : undefined);
 
@@ -223,7 +243,9 @@ export async function writeSections(ctx: AgentContext, ws: Workspace, outline: O
         `\nQuiz at the end: ${sec.quiz ? 'yes' : 'optional'}\nTarget length: about ${sec.target_words} words.` +
         (sec.sources.length ? `\nSources found during planning:\n${sec.sources.map((u) => `- ${u}`).join('\n')}` : ''),
       role,
-      research.enabled ? `Research tools: ${research.tools().map((t) => t.function.name).join(', ')}. Verify specific facts before writing.` : 'No research tools are available: rely on well-established knowledge only and do not include URLs.',
+      !research.tools().length ? 'No research tools are available: rely on well-established knowledge only; only cite URLs listed above.'
+        : quick ? `Optional lookups (at most ${q.researchCalls} call(s), only for what you can't write confidently): ${research.tools().map((t) => t.function.name).join(', ')}.`
+          : `Research tools: ${research.tools().map((t) => t.function.name).join(', ')}. Verify specific facts before writing.`,
     ].filter(Boolean).join('\n\n');
 
     const runTool = async (name: string, raw: string): Promise<string> => {
@@ -275,19 +297,20 @@ export async function writeSections(ctx: AgentContext, ws: Workspace, outline: O
     for (let attempt = 1; attempt <= 2 && !finished; attempt++) {
     if (attempt > 1) {
       ctx.emit({ type: 'note', level: 'warn', text: `section ${i + 1}: retrying with a fresh agent` });
-      research.beginRun(8);
+      beginRun(8);
     }
     const retryNote = attempt > 1 && written
       ? `\n\nNOTE: a previous attempt at this section did not finish. Its draft is saved: read it with read_section, then fix the problems the check reports (or rewrite the section with write_section if that is simpler), and call finish_section.`
       : '';
     run = await runAgent(ctx, {
       name: `section ${i + 1}/${n}${attempt > 1 ? ' (retry)' : ''}`,
-      system: prompt('section.md').replace('{{AUTHORING_GUIDE}}', () => guide),
+      system: prompt('section.md').replace('{{RESEARCH_POLICY}}', () => POLICY.section[rigor]).replace('{{AUTHORING_GUIDE}}', () => guide),
       user: user + retryNote,
-      maxSteps: ctx.cfg.agent.maxSteps,
+      maxSteps: quick ? q.maxSteps : ctx.cfg.agent.maxSteps,
+      ...(quick && { researchSteps: Math.max(1, Math.min(q.researchCalls, 3)) }),
       tools: () => [...research.tools(), ...SECTION_TOOLS.filter((t) => written || !['edit_section', 'read_section'].includes(t.function.name))],
       outputTools: () => SECTION_TOOLS.filter((t) => t.function.name === 'write_section'),
-      outputNudge: 'Stop researching and write your section NOW with write_section, using what you verified.',
+      outputNudge: quick ? 'Write your section NOW with write_section, from what you know.' : 'Stop researching and write your section NOW with write_section, using what you verified.',
       hasOutput: () => written,
       isDone: () => finished,
       nextHint: () => (!written ? 'Call write_section with your complete section.' : ws.passed ? 'Call finish_section.' : 'Fix the reported issues with edit_section.'),

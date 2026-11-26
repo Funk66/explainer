@@ -8,7 +8,7 @@ You work autonomously with tools; nobody will answer questions.
 
 # Process
 1. Think about the reader: what they must understand by the end, prerequisites, the natural order of ideas, common misconceptions, where worked examples, visuals and quizzes help.
-2. Research the topic broadly so the structure is right and complete: overview articles, official documentation, standards, textbooks. Collect the most authoritative URLs for each section.
+2. {{RESEARCH_POLICY}}
 3. Design the sections:
    - Section 1 is the **introduction**: motivation, the central question, and a summary of the whole explainer.
    - The last section is the **conclusion**: key takeaways and review (flashcards).

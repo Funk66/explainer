@@ -40,8 +40,10 @@ export interface AgentSpec {
   supersedes?: string;
   /** Tools after which earlier research results are compacted (the draft now contains what mattered). */
   compactAfter?: string[];
-  /** Share of maxSteps that may pass before the output is forced (default 0.5). */
+  /** Share of maxSteps that may pass before the output is forced (default 0.5, at least 6 steps). */
   researchBudget?: number;
+  /** Absolute number of steps before the output is forced; overrides researchBudget (quick runs). */
+  researchSteps?: number;
   /** Short description of a call's arguments for progress output. */
   describeCall?(name: string, args: any): string;
 }
@@ -71,7 +73,7 @@ export async function runAgent(ctx: AgentContext, spec: AgentSpec): Promise<Agen
     log({ agent: spec.name, ...m });
   };
 
-  const budget = Math.max(6, Math.floor(spec.maxSteps * (spec.researchBudget ?? 0.5)));
+  const budget = spec.researchSteps ?? Math.max(6, Math.floor(spec.maxSteps * (spec.researchBudget ?? 0.5)));
   let forceOutput = false;
   let idle = 0;
   let lastSignature = '';
@@ -105,7 +107,10 @@ export async function runAgent(ctx: AgentContext, spec: AgentSpec): Promise<Agen
       const handled = res.content && spec.onText ? await spec.onText(res.content) : null;
       if (handled) { say(handled); continue; }
       if (res.finishReason === 'length') {
-        say('Your response was cut off (token limit). Continue using the tools, and keep each tool call within the limit.');
+        // Usually the reasoning itself used up the output limit before any tool call was made.
+        say(res.content?.trim()
+          ? 'Your response was cut off (token limit). Continue using the tools, and keep each tool call within the limit.'
+          : `Your response hit the output token limit while you were still thinking, so nothing was done. Think much less: don't draft the content in your head — make the tool call directly and put the content in it. ${spec.nextHint()}`);
         continue;
       }
       if (++idle >= 3) return { done: spec.isDone(), steps: step, reason: 'idle', messages };

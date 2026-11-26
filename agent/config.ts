@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, ROOT } from '../scripts/lib/paths.ts';
-import type { Depth } from '../scripts/lib/meta.ts';
+import type { Depth, Rigor } from '../scripts/lib/meta.ts';
 import type { ResearchConfig } from './research/types.ts';
 
 export interface Config {
@@ -24,6 +24,24 @@ export interface Config {
     showReasoning: boolean;
     /** Depth used when none is requested: overview | standard | deep | comprehensive. */
     defaultDepth: Depth;
+    /**
+     * Rigor used when none is requested. "quick": write from knowledge with a few optional lookups, then one
+     * review pass (a handful of model turns). "thorough": research first, then a claim-by-claim fact-check.
+     */
+    defaultRigor: Rigor;
+  };
+  /** Limits for quick-rigor runs (thorough runs use agent.maxSteps, factCheck.maxSteps and the search limits). */
+  quick: {
+    /** Max model turns per agent (writer, each section writer, reviewer, fixer). */
+    maxSteps: number;
+    /** Research calls of any kind (searches + page reads) per agent; 0 = none. */
+    researchCalls: number;
+    /** Paid web searches per agent (within researchCalls). */
+    webSearches: number;
+    /** Give the writer the most relevant passages of the top Wikipedia articles up front (no model turns). */
+    reference: boolean;
+    /** reasoning_effort for quick runs; null = llm.reasoningEffort. "low" usually cuts rumination a lot. */
+    reasoningEffort: Config['llm']['reasoningEffort'];
   };
   factCheck: {
     /** Run a fresh-context fact-check (and a fix pass) after writing. */
@@ -67,7 +85,8 @@ const DEFAULTS: Config = {
     requestTimeoutSeconds: 1800,
     extraBody: {},
   },
-  agent: { maxSteps: 60, showReasoning: true, defaultDepth: 'standard' },
+  agent: { maxSteps: 60, showReasoning: true, defaultDepth: 'standard', defaultRigor: 'quick' },
+  quick: { maxSteps: 10, researchCalls: 3, webSearches: 2, reference: true, reasoningEffort: null },
   factCheck: { enabled: true, model: null, maxSteps: 40 },
   output: { openInBrowser: true },
   server: { port: 8080, publicUrl: null, jobRetries: 2 },
@@ -104,6 +123,7 @@ export function loadConfig(): Config {
   const cfg: Config = {
     llm: { ...DEFAULTS.llm, ...user.llm },
     agent: { ...DEFAULTS.agent, ...user.agent },
+    quick: { ...DEFAULTS.quick, ...user.quick },
     factCheck: { ...DEFAULTS.factCheck, ...user.factCheck },
     server: { ...DEFAULTS.server, ...user.server },
     notifications: { ...DEFAULTS.notifications, ...user.notifications, ntfy: { ...DEFAULTS.notifications.ntfy, ...user.notifications?.ntfy } },
@@ -124,6 +144,9 @@ export function loadConfig(): Config {
   }
   if (!['overview', 'standard', 'deep', 'comprehensive'].includes(cfg.agent.defaultDepth)) {
     throw new Error(`agent.defaultDepth must be overview, standard, deep or comprehensive (got "${cfg.agent.defaultDepth}")`);
+  }
+  if (!['quick', 'thorough'].includes(cfg.agent.defaultRigor)) {
+    throw new Error(`agent.defaultRigor must be quick or thorough (got "${cfg.agent.defaultRigor}")`);
   }
   if (!['none', 'tavily', 'jina'].includes(cfg.research.fetch.fallback)) {
     throw new Error(`research.fetch.fallback must be "none", "tavily" or "jina" (got "${cfg.research.fetch.fallback}")`);

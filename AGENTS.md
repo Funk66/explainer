@@ -6,10 +6,11 @@ This file is for coding agents (and humans) working **on the application**. If y
 
 A prompt such as "explain X and its applicability to Y" and a **depth** (overview → comprehensive) go to an autonomous agent pipeline:
 
-1. Research the topic on the web.
-2. Write an MDX document using a library of pre-built components. Long explainers are outlined first and then written section by section.
-3. Build each draft into a single self-contained HTML page and check it in a headless browser, fixing problems until the check passes.
-4. Fact-check the claims with a fresh agent and fix what it finds.
+1. Write an MDX document using a library of pre-built components. Long explainers are outlined first and then written section by section.
+2. Build each draft into a single self-contained HTML page and check it in a headless browser, fixing problems until the check passes.
+3. Review the draft with a fresh agent and fix what it finds.
+
+**Rigor** controls how much verification happens. `quick` (default) writes from the model's knowledge, using Wikipedia passages fetched up front (no model turns) and at most a few lookups, then does one review pass. That is a handful of model turns in total. `thorough` researches the web first and fact-checks claim by claim, which takes many times longer. Keep quick runs quick: don't add steps, tools or prompt text that make the model second-guess well-established facts.
 
 A local OpenAI-compatible LLM does the work. The pipeline runs from the CLI or from a self-hosted web service with a persistent job queue.
 
@@ -22,12 +23,13 @@ agent/                         the explainer pipeline (no HTTP, no terminal)
   events.ts                    AgentEvent stream emitted by everything (CLI renders it, server streams it)
   workspace.ts                 explainer file tools: write/edit/read/finish → build + check + citation checks
   longform.ts                  deep/comprehensive: outline agent + one agent per section (resumable)
-  factcheck.ts                 fact-check agents (per range) + fixer agent; factcheck.json
+  factcheck.ts                 review (quick, one pass) / fact-check agents (thorough, per range) + fixer; factcheck.json
   depth.ts                     depth definitions (words, sections, visuals, mode)
   research/                    web_search (searxng | tavily chain), search_wikipedia, fetch_page (+PDF, focus)
   llm.ts                       streaming chat completions (OpenAI-compatible; no idle timeouts)
   config.ts                    config loading (EXPLAINER_CONFIG → <data>/config.json → explainer.config.json) + env overrides
-  prompts/                     authoring-guide.md (content rules, shared) + one prompt per agent role
+  prompts/                     authoring-guide.md (content rules, shared by both rigors) + one prompt per agent role
+                               (writer-quick/review = quick; writer/factcheck = thorough; outline/section take {{RESEARCH_POLICY}})
   cli.ts, terminal.ts, ui.ts   `npm run explain` front end
 server/                        the self-hosted service (`npm start`)
   main.ts                      entry point
@@ -98,6 +100,7 @@ Describe the agent as an `AgentSpec` and run it with `runAgent` (`agent/loop.ts`
 - `katex` must stay pinned to the version `rehype-katex` depends on, otherwise CSS and HTML disagree (broken fractions).
 - Astro 7 uses Sätteri by default; this project sets `markdown.processor: unified(...)` from `@astrojs/markdown-remark` so remark/rehype plugins work.
 - The server listens on `::` (dual-stack). Listening only on `0.0.0.0` breaks `localhost` access through Docker Desktop's IPv6 port forwarding.
+- Quick runs limit research with `Research.beginRun(webSearches, callBudget)`: when the call budget is used up, `tools()` stops offering research tools. Removing tools is what reliably stops a model from researching; telling it to stop in the prompt is not enough.
 - Paid web searches are limited in three places: the explainer-wide cap (`setJobLimit`), per-agent budgets (`beginRun`), and the repeat guard. Keep new agents within these and call `beginRun` with a budget.
 - The job runner must stay single-worker: the inference endpoint is usually one GPU, and builds of the same slug would race. Batch submission just creates several queued jobs.
 - On shutdown the running job is left as "running" so `recoverInterrupted()` re-queues it on start. Long-form generations resume from `outline.json`.

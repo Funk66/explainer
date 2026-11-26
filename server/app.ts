@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Config } from '../agent/config.ts';
-import { DEPTH_NAMES, DEPTHS, type Depth } from '../agent/depth.ts';
+import { DEPTH_NAMES, DEPTHS, type Depth, RIGOR_NAMES, type Rigor } from '../agent/depth.ts';
 import { slugify, uniqueSlug } from '../agent/pipeline.ts';
 import { Research } from '../agent/research/index.ts';
 import { writeMeta } from '../scripts/lib/meta.ts';
@@ -44,13 +44,17 @@ export function createApp(cfg: Config, runner: JobRunner) {
     const body = await c.req.json().catch(() => ({}));
     if (!explainerDetail(slug)) return c.json({ error: 'not found' }, 404);
     if (!String(body.instruction ?? '').trim()) return c.json({ error: 'instruction is required' }, 400);
-    return c.json(enqueue({ type: 'revise', slug, params: { instruction: String(body.instruction).trim(), factCheck: Boolean(body.factCheck) } }));
+    const rigor: Rigor = RIGOR_NAMES.includes(body.rigor) ? body.rigor : cfg.agent.defaultRigor;
+    return c.json(enqueue({ type: 'revise', slug, params: { instruction: String(body.instruction).trim(), factCheck: Boolean(body.factCheck), rigor } }));
   });
 
-  app.post('/api/explainers/:slug/fact-check', (c) => {
+  /** Body: { rigor? } — thorough (default) = claim-by-claim fact-check, quick = one review pass. */
+  app.post('/api/explainers/:slug/fact-check', async (c) => {
     const slug = c.req.param('slug');
+    const body = await c.req.json().catch(() => ({}));
     if (!explainerDetail(slug)) return c.json({ error: 'not found' }, 404);
-    return c.json(enqueue({ type: 'recheck', slug, params: {} }));
+    const rigor: Rigor = RIGOR_NAMES.includes(body.rigor) ? body.rigor : 'thorough';
+    return c.json(enqueue({ type: 'recheck', slug, params: { rigor } }));
   });
 
   app.post('/api/explainers/:slug/rebuild', (c) => {
@@ -62,21 +66,22 @@ export function createApp(cfg: Config, runner: JobRunner) {
   app.post('/api/rebuild-all', (c) => c.json(enqueue({ type: 'rebuild', slug: '*', params: {}, maxAttempts: 1 })));
 
   // ----- Jobs -----
-  /** Body: { prompt } or { prompts: [...] } (batch), plus optional depth and factCheck. */
+  /** Body: { prompt } or { prompts: [...] } (batch), plus optional depth, rigor and factCheck. */
   app.post('/api/jobs', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const prompts: string[] = (Array.isArray(body.prompts) ? body.prompts : [body.prompt]).map((s: unknown) => String(s ?? '').trim()).filter(Boolean);
     if (prompts.length === 0) return c.json({ error: 'prompt is required' }, 400);
     if (prompts.length > 100) return c.json({ error: 'at most 100 prompts per batch' }, 400);
     const depth: Depth = DEPTH_NAMES.includes(body.depth) ? body.depth : cfg.agent.defaultDepth;
+    const rigor: Rigor = RIGOR_NAMES.includes(body.rigor) ? body.rigor : cfg.agent.defaultRigor;
     const factCheck = body.factCheck === undefined ? cfg.factCheck.enabled : Boolean(body.factCheck);
     const batchId = prompts.length > 1 ? `b${Date.now().toString(36)}` : null;
     const jobs = prompts.map((prompt) => {
       // Reserve the slug now so the explainer shows up in the index and retries reuse the same folder.
       const slug = uniqueSlug(slugify(prompt));
       mkdirSync(paths(slug).dir, { recursive: true });
-      writeMeta(paths(slug), { status: 'draft', statusDetail: 'queued', prompt, depth, model: cfg.llm.model, title: prompt, description: '' });
-      return enqueue({ type: 'generate', slug, params: { prompt, depth, factCheck }, batchId });
+      writeMeta(paths(slug), { status: 'draft', statusDetail: 'queued', prompt, depth, rigor, model: cfg.llm.model, title: prompt, description: '' });
+      return enqueue({ type: 'generate', slug, params: { prompt, depth, rigor, factCheck }, batchId });
     });
     runner.publish({ kind: 'explainers' });
     return c.json({ batchId, jobs });
@@ -133,6 +138,7 @@ export function createApp(cfg: Config, runner: JobRunner) {
       research,
       factCheck: cfg.factCheck.enabled,
       defaultDepth: cfg.agent.defaultDepth,
+      defaultRigor: cfg.agent.defaultRigor,
       depths: DEPTH_NAMES.map((d) => ({ id: d, label: DEPTHS[d].label, minutes: DEPTHS[d].minutes, words: DEPTHS[d].words, mode: DEPTHS[d].mode })),
       notifications: Boolean(cfg.notifications.ntfy.url && cfg.notifications.ntfy.topic),
     });
