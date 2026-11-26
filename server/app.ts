@@ -154,7 +154,7 @@ export function createApp(cfg: Config, runner: JobRunner) {
     if (!validSlug(slug) || !existsSync(p.html)) return c.text('Not found', 404);
     c.header('Content-Security-Policy', 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads');
     c.header('Cache-Control', 'no-cache');
-    return c.html(readFileSync(p.html, 'utf8').replace('<body>', () => `<body>${BACK_LINK}`));
+    return c.html(readFileSync(p.html, 'utf8').replace(/<body\b[^>]*>/, (m) => `${m}${BACK_LINK}`));
   });
   app.get('/e/:slug', (c) => c.redirect(`/e/${c.req.param('slug')}/`, 301));
   app.get('/e/:slug/download', (c) => {
