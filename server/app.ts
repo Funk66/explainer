@@ -1,7 +1,7 @@
 // HTTP API + static files. The browser UI is a separate static app that only talks to this API.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Config } from '../agent/config.ts';
 import { DEPTH_NAMES, DEPTHS, type Depth, RIGOR_NAMES, type Rigor } from '../agent/depth.ts';
@@ -168,6 +168,22 @@ export function createApp(cfg: Config, runner: JobRunner) {
     const p = paths(c.req.param('slug'));
     if (!validSlug(p.slug) || !existsSync(p.mdx)) return c.text('Not found', 404);
     return c.body(readFileSync(p.mdx, 'utf8'), 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+  });
+
+  // ----- Installable / offline support (see src/app/offline.ts) -----
+  // The service worker must be served from the root to control the whole site; no-cache so updates are picked up.
+  const pwaFile = (name: string, type: string, cache: string) => (c: Context) => {
+    const f = path.join(ROOT, 'server/pwa', name);
+    if (!existsSync(f)) return c.text('Not found', 404);
+    c.header('Cache-Control', cache);
+    return c.body(readFileSync(f), 200, { 'Content-Type': type });
+  };
+  app.get('/sw.js', pwaFile('sw.js', 'text/javascript; charset=utf-8', 'no-cache'));
+  app.get('/manifest.webmanifest', pwaFile('manifest.webmanifest', 'application/manifest+json', 'no-cache'));
+  app.get('/icons/:name', (c) => {
+    const name = c.req.param('name');
+    if (!/^[a-z0-9-]+\.(png|svg)$/.test(name)) return c.text('Not found', 404);
+    return pwaFile(`icons/${name}`, name.endsWith('svg') ? 'image/svg+xml' : 'image/png', 'public, max-age=86400')(c);
   });
 
   // ----- The web app -----

@@ -13,7 +13,7 @@ interface Job {
 }
 interface Meta {
   slug: string; title: string; description: string; tags: string[]; level?: string; depth?: string; prompt?: string;
-  model?: string; status: Status; statusDetail?: string; words?: number; readingMinutes?: number; citations?: number;
+  model?: string; htmlBytes?: number; status: Status; statusDetail?: string; words?: number; readingMinutes?: number; citations?: number;
   rigor?: string; factCheck?: { mode?: string; claimsChecked: number; problems: number; fixed: boolean }; createdAt: string; updatedAt: string; job: Job | null;
 }
 interface AppConfig { model: string; research: string; factCheck: boolean; defaultDepth: string; defaultRigor: string; depths: { id: string; label: string; minutes: number; words: [number, number]; mode: string }[]; notifications: boolean }
@@ -21,6 +21,8 @@ interface AppConfig { model: string; research: string; factCheck: boolean; defau
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel)!;
 const view = $('#view');
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+import { cachedSlugs, initOffline, syncLibrary } from './offline.ts';
 
 // ---------------------------------------------------------------- API
 async function api<T = any>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
@@ -37,10 +39,29 @@ const state = {
   jobs: [] as Job[],
   filters: { q: '', tag: '', level: '', depth: '', status: '' },
   liveJobId: null as number | null,
+  /** The library came from the service worker's cache because the server could not be reached. */
+  offline: false,
 };
 try { Object.assign(state.filters, JSON.parse(localStorage.getItem('explainer-filters') ?? '{}')); } catch { /* ignore */ }
 
-async function loadExplainers() { state.explainers = await api<Meta[]>('/api/explainers'); }
+async function loadExplainers() {
+  const res = await fetch('/api/explainers');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  state.offline = res.headers.has('x-served-from-cache');
+  state.explainers = data;
+  if (state.offline) {
+    // Only what is stored on this device can be opened.
+    const have = await cachedSlugs();
+    state.explainers = state.explainers.filter((e) => have.has(e.slug));
+  } else {
+    syncLibrary(state.explainers); // keep the offline copy in step with the server (also removes deleted explainers)
+  }
+  updateOfflineBanner();
+}
+function updateOfflineBanner() {
+  document.getElementById('offline-banner')?.classList.toggle('hidden', !state.offline);
+}
 async function loadJobs() { state.jobs = await api<Job[]>('/api/jobs?limit=100'); updateHeader(); }
 
 // ---------------------------------------------------------------- helpers
@@ -112,6 +133,7 @@ async function renderLibrary() {
   const TOP = 10;
   const f = state.filters;
   view.innerHTML = `
+    <div id="offline-banner" class="alert alert-warning mb-4 py-2 text-sm ${state.offline ? '' : 'hidden'}">Offline: showing the explainers saved on this device. <button id="retry-online" class="btn btn-xs btn-ghost underline">Retry</button></div>
     <div class="mb-6 flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2">
         <label class="input input-sm flex-1 min-w-[12rem]">
@@ -129,6 +151,7 @@ async function renderLibrary() {
     try { localStorage.setItem('explainer-filters', JSON.stringify(f)); } catch { /* ignore */ }
     renderCards();
   };
+  $('#retry-online').addEventListener('click', () => route());
   $('#f-q').addEventListener('input', (e) => { f.q = (e.target as HTMLInputElement).value; rerender(); });
   for (const k of ['level', 'depth', 'status'] as const) $(`#f-${k}`).addEventListener('change', (e) => { f[k] = (e.target as HTMLSelectElement).value; rerender(); });
   view.querySelectorAll<HTMLElement>('[data-tag]').forEach((b) => b.addEventListener('click', () => { f.tag = f.tag === b.dataset.tag ? '' : b.dataset.tag!; renderLibrary(); }));
@@ -180,7 +203,7 @@ function card(e: Meta) {
         ${e.status !== 'ready' && !busy ? `<span class="badge badge-sm ${statusBadge[e.status]}" title="${esc(e.statusDetail ?? '')}">${esc(e.status.replace('-', ' '))}</span>` : ''}
         ${e.factCheck?.claimsChecked ? `<span class="badge badge-sm badge-ghost" title="fact-check">✓ ${e.factCheck.claimsChecked} claims${e.factCheck.problems ? ` · ${e.factCheck.problems} fixed` : ''}</span>` : e.factCheck?.mode === 'review' ? `<span class="badge badge-sm badge-ghost" title="reviewed once after writing">✓ reviewed${e.factCheck.problems ? ` · ${e.factCheck.problems} fixed` : ''}</span>` : ''}
         ${e.tags.slice(0, 3).map((t) => `<span class="badge badge-sm badge-outline border-base-content/15 text-base-content/60">${esc(t)}</span>`).join('')}
-        <a href="#/x/${e.slug}" class="btn btn-ghost btn-xs relative z-10 ml-auto" title="Details and actions">
+        <a href="#/x/${e.slug}" class="btn btn-ghost btn-xs relative z-10 ml-auto ${state.offline ? 'hidden' : ''}" title="Details and actions">
           <svg class="size-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
         </a>
       </div>
@@ -450,6 +473,20 @@ function scheduleRefresh() {
   }, 400);
 }
 
+// New, updated and deleted explainers reach the offline copy even when the library is not the page on screen.
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+function syncSoon() {
+  if (syncTimer) return;
+  syncTimer = setTimeout(async () => {
+    syncTimer = null;
+    try {
+      const res = await fetch('/api/explainers');
+      if (res.ok && !res.headers.has('x-served-from-cache')) await syncLibrary(await res.json());
+    } catch { /* offline */ }
+  }, 800);
+}
+addEventListener('online', () => { syncSoon(); if (!location.hash || location.hash === '#/') route(); });
+
 function connect() {
   const es = new EventSource('/api/events');
   es.addEventListener('job', (m) => {
@@ -462,7 +499,7 @@ function connect() {
     if (e) e.job = job;
     scheduleRefresh();
   });
-  es.addEventListener('explainers', () => scheduleRefresh());
+  es.addEventListener('explainers', () => { scheduleRefresh(); syncSoon(); });
   es.addEventListener('event', (m) => {
     const { jobId, event } = JSON.parse((m as MessageEvent).data);
     if (jobId === state.liveJobId) liveSink?.(event);
@@ -477,6 +514,7 @@ $('#theme-toggle').addEventListener('click', () => {
   try { localStorage.setItem('explainer-theme', next); } catch { /* ignore */ }
 });
 
+initOffline();
 loadJobs().catch(() => {});
 connect();
 route();

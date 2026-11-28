@@ -36,6 +36,7 @@ server/                        the self-hosted service (`npm start`)
   app.ts                       Hono HTTP API + SSE + static UI + sandboxed explainer pages
   runner.ts                    single-worker job runner: one job at a time, retries, resume after restart, notifications
   db.ts                        SQLite (node:sqlite) jobs + coalesced event log
+  pwa/                         sw.js (service worker), manifest.webmanifest, icons/ (regenerate: node scripts/make-icons.ts)
   explainers.ts, notify.ts     library listing/deletion, ntfy notifications
 src/                           Astro project: renderer for explainers AND the web UI
   components/*.astro           MDX components; registered in components/index.ts (available without imports)
@@ -96,6 +97,8 @@ Implement `SearchProvider` (`agent/research/types.ts`) in its own file, add it t
 Describe the agent as an `AgentSpec` and run it with `runAgent` (`agent/loop.ts`), which gives you streaming, events, the loop guards, context compaction, retries and cancellation. Put orchestration in `agent/pipeline.ts`, so the CLI and the job runner can both use it, and add a job type in `server/runner.ts` / `server/app.ts` if it should be available in the web app.
 
 ## Gotchas
+
+- **Offline/PWA**: `src/app/offline.ts` mirrors every explainer page into the Cache API (`explainers-v1`) whenever the library is loaded or an SSE `explainers` event arrives (versioned by `updatedAt`; deleted slugs are removed). `server/pwa/sw.js` serves the shell and library JSON network-first and `/e/<slug>/` cache-first; sync requests carry `x-offline-sync` so they bypass the worker. Service workers need https or `localhost`: over plain http on a LAN IP the app works online only. Bump `APP`/`PAGES` in `sw.js` (and `PAGES` in `offline.ts`) if the cached format changes.
 
 - `katex` must stay pinned to the version `rehype-katex` depends on, otherwise CSS and HTML disagree (broken fractions).
 - Astro 7 uses Sätteri by default; this project sets `markdown.processor: unified(...)` from `@astrojs/markdown-remark` so remark/rehype plugins work.

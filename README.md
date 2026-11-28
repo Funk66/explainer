@@ -317,3 +317,9 @@ data/                          ← EXPLAINER_DATA_DIR (/data in the container)
 - **Status "needs attention"**: the last check didn't pass, or fact-check findings weren't fully resolved. Open the explainer's details for the report, then revise it or fact-check again.
 - **SearXNG returns HTTP 403**: its JSON API isn't enabled.
 - **Page size**: about 1 MB of base CSS and fonts; charts add about 1 MB and diagrams about 5 MB. Libraries are only included when a page uses them.
+
+## Offline use and installing as an app
+
+The web UI is a PWA. Once opened, the browser keeps a copy of every explainer (a few MB in total), so the library and all articles stay readable without a connection. New explainers are downloaded as soon as they are finished, and deleted ones are removed from the device. On a phone, use "Add to Home Screen" / "Install app" to open the library like a normal app, even when offline.
+
+Browsers only allow this over **HTTPS** (or `localhost`). Behind a VPN or on the LAN with plain `http://<ip>:8080` everything still works online, but nothing is stored for offline use, and the app can't be installed. Put the service behind a reverse proxy with a certificate (for example Caddy, Tailscale Serve or a local CA) to enable it.
